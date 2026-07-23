@@ -1,0 +1,20 @@
+{
+  "root": "/Users/gabe/src/shifty-lsp",
+  "locations": [
+    "/Users/gabe/src/shifty-lsp"
+  ],
+  "external_graph_store": null,
+  "includes": [
+    "*.ttl"
+  ],
+  "excludes": [],
+  "include_ontologies": [],
+  "exclude_ontologies": [],
+  "require_ontology_names": false,
+  "strict": false,
+  "offline": false,
+  "resolution_policy": "default",
+  "use_cached_ontologies": false,
+  "remote_cache_ttl_secs": 86400,
+  "temporary": false
+}

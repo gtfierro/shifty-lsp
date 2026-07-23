@@ -20,9 +20,10 @@ This provides the `shifty-lsp` executable (stdio transport).
 
 ## How it works
 
-1. On `initialize`, the server finds the Git root of the workspace (walks up looking for
-   `.git`; falls back to the workspace folder) and opens/creates an ontoenv environment
-   there (`.ontoenv/` directory).
+1. On `initialize` (or lazily on first file open), the server finds the Git root of the
+   workspace (walks up looking for `.git`; falls back to the workspace folder) and
+   opens/creates an ontoenv environment there (`.ontoenv/` directory). Opening any file
+   automatically loads the environment and triggers validation — no manual setup needed.
 2. On document open/change (debounced ~0.8s) and save:
    - The document is parsed with rdflib (parse errors become diagnostics).
    - The file is registered with ontoenv, which downloads any missing `owl:imports`.
@@ -31,6 +32,17 @@ This provides the `shifty-lsp` executable (stdio transport).
      validates; results are mapped to diagnostics, positioned at the line where the focus
      node IRI (or its local name) first appears in the file.
 3. On save, ontoenv re-scans the repo so newly added `.ttl` files join the environment.
+
+## Commands
+
+Executable via `workspace/executeCommand` from your editor:
+
+- `shifty-lsp.refreshEnvironment` — re-scan the repository and rebuild the ontoenv
+  environment, then revalidate all open documents.
+- `shifty-lsp.validateWorkspace` — validate every `.ttl` file in the repository (open or
+  not) and publish diagnostics for each.
+
+In Neovim: `:lua vim.lsp.buf.execute_command({ command = "shifty-lsp.validateWorkspace" })`.
 
 ## Editor setup
 

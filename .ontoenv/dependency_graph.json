@@ -1,0 +1,13 @@
+{
+  "nodes": [
+    {
+      "location": {
+        "file": "/Users/gabe/src/shifty-lsp/test/iaq_sensor_deployment.ttl"
+      },
+      "name": "http://example.com/iaq_sensor_deployment"
+    }
+  ],
+  "node_holes": [],
+  "edge_property": "directed",
+  "edges": []
+}

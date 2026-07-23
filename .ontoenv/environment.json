@@ -1,0 +1,27 @@
+{
+  "ontologies": [
+    {
+      "id": {
+        "location": {
+          "file": "/Users/gabe/src/shifty-lsp/test/iaq_sensor_deployment.ttl"
+        },
+        "name": "http://example.com/iaq_sensor_deployment"
+      },
+      "name": "http://example.com/iaq_sensor_deployment",
+      "imports": [
+        "https://brickschema.org/schema/1.5/Brick"
+      ],
+      "location": {
+        "file": "/Users/gabe/src/shifty-lsp/test/iaq_sensor_deployment.ttl"
+      },
+      "last_updated": "2026-07-23T23:06:23.516527Z",
+      "version_properties": {
+        "http://www.w3.org/2000/01/rdf-schema#label": "\"Residential IAQ sensor deployment\""
+      },
+      "namespace_map": {},
+      "content_hash": "f647d6fe5ba6b615a9b92da42ee03a9f21c14d7c4094cf2bef9397f5f5b15c6d"
+    }
+  ],
+  "default_policy": "default",
+  "aliases": {}
+}

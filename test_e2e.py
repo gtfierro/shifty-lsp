@@ -131,6 +131,29 @@ def main():
     assert any("name" in d["message"] or "Person" in d["message"] for d in diags)
     print(f"\nOK: got {len(diags)} diagnostic(s)")
 
+    # workspace/executeCommand: refreshEnvironment
+    send(proc, {
+        "jsonrpc": "2.0", "id": 2, "method": "workspace/executeCommand",
+        "params": {"command": "shifty-lsp.refreshEnvironment", "arguments": []},
+    })
+    reader.wait_for(lambda m: m.get("id") == 2)
+    print("OK: refreshEnvironment command")
+
+    # workspace/executeCommand: validateWorkspace should publish diagnostics
+    # for shapes.ttl too (a file that is not open in the editor)
+    shapes_uri = Path(os.path.realpath(tmp / "shapes.ttl")).as_uri()
+    send(proc, {
+        "jsonrpc": "2.0", "id": 3, "method": "workspace/executeCommand",
+        "params": {"command": "shifty-lsp.validateWorkspace", "arguments": []},
+    })
+    reader.wait_for(
+        lambda m: m.get("method") == "textDocument/publishDiagnostics"
+        and m["params"]["uri"] == shapes_uri,
+        timeout=60,
+    )
+    reader.wait_for(lambda m: m.get("id") == 3)
+    print("OK: validateWorkspace command")
+
     send(proc, {"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": None})
     reader.wait_for(lambda m: m.get("id") == 99)
     send(proc, {"jsonrpc": "2.0", "method": "exit"})

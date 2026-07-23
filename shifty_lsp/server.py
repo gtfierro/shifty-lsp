@@ -125,6 +125,16 @@ def on_initialize(params: types.InitializeParams) -> None:
 
 @server.feature(types.TEXT_DOCUMENT_DID_OPEN)
 def did_open(params: types.DidOpenTextDocumentParams) -> None:
+    # Automatically load the ontoenv environment for the file's repository
+    # (creating it if necessary), pick up any new/changed files, and kick off
+    # validation of the opened file.
+    try:
+        path = _uri_to_path(params.text_document.uri)
+        env = ENV.ensure(find_repo_root(path.parent))
+        with ENV.lock:
+            env.update()
+    except Exception:
+        log.exception("ontoenv load failed on open")
     _schedule_validation(params.text_document.uri)
 
 
@@ -251,9 +261,16 @@ def _report_to_diagnostics(
 
 
 def validate_document(uri: str) -> None:
-    doc = server.workspace.get_text_document(uri)
-    text = doc.source
     path = _uri_to_path(uri)
+    try:
+        text = server.workspace.get_text_document(uri).source
+    except Exception:
+        # File is not open in the editor; read it from disk.
+        try:
+            text = path.read_text()
+        except Exception:
+            log.exception("could not read %s", path)
+            return
     diagnostics: list[types.Diagnostic] = []
 
     try:
@@ -296,6 +313,37 @@ def validate_document(uri: str) -> None:
         log.exception("validation failed for %s", uri)
 
     _publish(uri, diagnostics)
+
+
+CMD_REFRESH_ENVIRONMENT = "shifty-lsp.refreshEnvironment"
+CMD_VALIDATE_WORKSPACE = "shifty-lsp.validateWorkspace"
+
+
+@server.command(CMD_REFRESH_ENVIRONMENT)
+def refresh_environment(*args) -> None:
+    """Re-scan the repository, re-registering all .ttl files and refreshing
+    the ontoenv environment; then revalidate all open documents."""
+    log.info("command: refreshEnvironment")
+    ENV.refresh()
+    for uri in list(server.workspace.text_documents):
+        _schedule_validation(uri)
+
+
+@server.command(CMD_VALIDATE_WORKSPACE)
+def validate_workspace(*args) -> None:
+    """Validate every .ttl file in the repository and publish diagnostics
+    for each one (including files that are not open in the editor)."""
+    log.info("command: validateWorkspace")
+    root = ENV.root
+    if root is None:
+        docs = list(server.workspace.text_documents)
+        if not docs:
+            return
+        root = find_repo_root(_uri_to_path(docs[0]).parent)
+    for ttl in sorted(root.rglob("*.ttl")):
+        if ".ontoenv" in ttl.parts:
+            continue
+        validate_document(ttl.as_uri())
 
 
 def _publish(uri: str, diagnostics: list[types.Diagnostic]) -> None:
