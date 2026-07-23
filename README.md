@@ -75,8 +75,32 @@ vim.api.nvim_create_autocmd("FileType", {
       root_dir = vim.fs.root(0, ".git") or vim.fn.getcwd(),
     })
 
-    -- inline diagnostics
-    vim.diagnostic.config({ virtual_text = true, signs = true, underline = true })
+    -- inline diagnostics, with long SHACL messages wrapped to the window width
+    local function wrap_text(msg, width)
+      local out, line = {}, ""
+      for word in tostring(msg):gmatch("%S+") do
+        if #line + #word + 1 > width then
+          table.insert(out, line)
+          line = word
+        else
+          line = line == "" and word or (line .. " " .. word)
+        end
+      end
+      table.insert(out, line)
+      return table.concat(out, "\n")
+    end
+    vim.diagnostic.config({
+      signs = true,
+      underline = true,
+      virtual_text = {
+        format = function(d)
+          local width = vim.api.nvim_win_get_width(0) - d.col - 8
+          return wrap_text(d.message, math.max(width, 40))
+        end,
+      },
+      -- alternative: render each diagnostic on its own line(s) below the code
+      -- virtual_lines = { format = function(d) return d.message end },
+    })
 
     -- completion: manual via omnifunc (<C-x><C-o>), or wire up nvim-cmp/blink.cmp
     -- with the 'nvim_lsp' source for as-you-type completion

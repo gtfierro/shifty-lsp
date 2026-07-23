@@ -428,22 +428,30 @@ def _report_to_diagnostics(
             report_graph.value(result, SH.resultMessage) or "SHACL constraint violation"
         )
         focus = report_graph.value(result, SH.focusNode)
+        value = report_graph.value(result, SH.value)
         path = report_graph.value(result, SH.resultPath)
         if path is not None:
             message += f" (path: {path})"
-        line = _find_line(text, focus) if focus is not None else 0
-        rng = types.Range(
-            start=types.Position(line=line, character=0),
-            end=types.Position(line=line, character=10**6),
-        )
-        diagnostics.append(
-            types.Diagnostic(
-                range=rng,
-                message=message,
-                severity=severity,
-                source="shifty",
+        # Report on both the focus node and the value node (if distinct and
+        # locatable in the document).
+        focus_line = _find_line(text, focus) if focus is not None else 0
+        lines = {focus_line}
+        if value is not None:
+            value_line = _find_line(text, value)
+            lines.add(value_line)
+        for line in sorted(lines):
+            rng = types.Range(
+                start=types.Position(line=line, character=0),
+                end=types.Position(line=line, character=10**6),
             )
-        )
+            diagnostics.append(
+                types.Diagnostic(
+                    range=rng,
+                    message=message,
+                    severity=severity,
+                    source="shifty",
+                )
+            )
     return diagnostics
 
 
