@@ -46,6 +46,14 @@ Executable via `workspace/executeCommand` from your editor:
   argument; defaults to the current document) and publish diagnostics. Returns `true` if
   the file conforms, `false` otherwise.
 
+## Completion
+
+`textDocument/completion` (triggered by `:`): typing a prefixed name like `brick:IAQ`
+offers every class, property, and individual in that namespace, drawn from the merged
+imports closure in the ontoenv environment. Items carry the term's `rdfs:label` as detail
+and `rdfs:comment` as documentation. Completion works even while the buffer doesn't parse
+(imports are recovered with a regex), and the client filters as you keep typing.
+
 ## Goto definition
 
 `textDocument/definition` is supported: with the cursor on an ontology IRI or prefixed
@@ -69,6 +77,10 @@ vim.api.nvim_create_autocmd("FileType", {
 
     -- inline diagnostics
     vim.diagnostic.config({ virtual_text = true, signs = true, underline = true })
+
+    -- completion: manual via omnifunc (<C-x><C-o>), or wire up nvim-cmp/blink.cmp
+    -- with the 'nvim_lsp' source for as-you-type completion
+    vim.bo[args.buf].omnifunc = "v:lua.vim.lsp.omnifunc"
 
     -- goto definition (jump to an ontology's .ttl from its IRI in owl:imports)
     vim.keymap.set("n", "gd", vim.lsp.buf.definition, { buffer = args.buf, desc = "goto definition" })

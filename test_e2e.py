@@ -158,6 +158,34 @@ def main():
     assert got_uri == want_uri, f"definition -> {got_uri}, want {want_uri}"
     print("OK: definition ->", got_uri)
 
+    # textDocument/completion: typing "ex:P" offers terms from the imported ontology
+    comp_path = tmp / "comp.ttl"
+    comp_text = (
+        "@prefix ex: <http://example.org/> .\n"
+        "@prefix owl: <http://www.w3.org/2002/07/owl#> .\n"
+        "<http://example.org/comp> a owl:Ontology ;\n"
+        "    owl:imports <http://example.org/shapes> .\n"
+        "ex:thing a ex:P"
+    )
+    comp_path.write_text(comp_text)
+    send(proc, {
+        "jsonrpc": "2.0", "method": "textDocument/didOpen",
+        "params": {"textDocument": {"uri": comp_path.as_uri(), "languageId": "turtle",
+                                    "version": 1, "text": comp_text}},
+    })
+    time.sleep(3)  # let validation run so the shapes cache is warm
+    send(proc, {
+        "jsonrpc": "2.0", "id": 6, "method": "textDocument/completion",
+        "params": {
+            "textDocument": {"uri": comp_path.as_uri()},
+            "position": {"line": 4, "character": len("ex:thing a ex:P")},
+        },
+    })
+    resp = reader.wait_for(lambda m: m.get("id") == 6)
+    labels = {i["label"] for i in resp["result"]["items"]}
+    print("OK: completion items:", sorted(labels))
+    assert "ex:Person" in labels and "ex:PersonShape" in labels and "ex:name" in labels
+
     # workspace/executeCommand: refreshEnvironment
     send(proc, {
         "jsonrpc": "2.0", "id": 2, "method": "workspace/executeCommand",

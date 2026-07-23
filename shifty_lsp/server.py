@@ -307,6 +307,116 @@ def _find_line(text: str, node: rdflib.term.Node) -> int:
     return 0
 
 
+# uri -> most recent shapes graph used for validation (drives completion)
+_last_shapes: dict[str, rdflib.Graph] = {}
+
+RDFS = rdflib.Namespace("http://www.w3.org/2000/01/rdf-schema#")
+
+_TYPE_KINDS = {
+    OWL.Class: types.CompletionItemKind.Class,
+    RDFS.Class: types.CompletionItemKind.Class,
+    OWL.ObjectProperty: types.CompletionItemKind.Property,
+    OWL.DatatypeProperty: types.CompletionItemKind.Property,
+    OWL.AnnotationProperty: types.CompletionItemKind.Property,
+    RDF.Property: types.CompletionItemKind.Property,
+    OWL.NamedIndividual: types.CompletionItemKind.Value,
+}
+
+
+def _completion_items_for_prefix(
+    graph: rdflib.Graph, prefix: str, namespace: str
+) -> list[types.CompletionItem]:
+    """All qname candidates in `namespace` found in the graph."""
+    terms: set[URIRef] = set()
+    for s, p, o in graph:
+        for t in (s, p, o):
+            if isinstance(t, URIRef) and str(t).startswith(namespace):
+                terms.add(t)
+    items: list[types.CompletionItem] = []
+    for term in sorted(terms):
+        local = str(term)[len(namespace):]
+        if not local:
+            continue
+        kind = types.CompletionItemKind.Keyword
+        for t, k in _TYPE_KINDS.items():
+            if (term, RDF.type, t) in graph:
+                kind = k
+                break
+        label = graph.value(term, RDFS.label)
+        comment = graph.value(term, RDFS.comment)
+        doc = None
+        if comment:
+            doc = str(comment)[:500]
+        elif label:
+            doc = str(label)
+        items.append(
+            types.CompletionItem(
+                label=f"{prefix}:{local}",
+                kind=kind,
+                detail=str(label) if label else None,
+                documentation=doc,
+                filter_text=local,
+            )
+        )
+    return items
+
+
+def _document_prefixes(text: str) -> dict[str, str]:
+    return dict(re.findall(r"(?:@prefix|PREFIX)\s+([\w-]+):\s*<([^>]+)>", text))
+
+
+@server.feature(
+    types.TEXT_DOCUMENT_COMPLETION,
+    types.CompletionOptions(trigger_characters=[":"], resolve_provider=False),
+)
+def completion(params: types.CompletionParams) -> Optional[types.CompletionList]:
+    """Prefix-aware completion: `brick:IAQ|` completes terms from the Brick
+    namespace using the merged ontology environment (imports closure)."""
+    try:
+        doc = server.workspace.get_text_document(params.text_document.uri)
+        lines = doc.source.splitlines()
+        pos = params.position
+        if pos.line >= len(lines):
+            return None
+        m = re.search(r"([A-Za-z_][\w-]*):([\w.-]*)$", lines[pos.line][: pos.character])
+        if not m:
+            return None
+        prefix = m.group(1)
+        namespace = _document_prefixes(doc.source).get(prefix)
+        if namespace is None:
+            return None
+
+        graph = _last_shapes.get(params.text_document.uri)
+        if graph is None:
+            # Not validated yet (or the buffer doesn't currently parse —
+            # common mid-typing). Extract imports with a regex and build the
+            # closure from those.
+            env = ENV.ensure(find_repo_root(_uri_to_path(params.text_document.uri).parent))
+            graph = rdflib.Graph()
+            with ENV.lock:
+                try:
+                    data_graph = rdflib.Graph()
+                    data_graph.parse(data=doc.source, format="turtle")
+                    graph, _failed = _build_shapes_graph(
+                        env, data_graph, _uri_to_path(params.text_document.uri)
+                    )
+                except Exception:
+                    for imp in re.findall(r"owl:imports\s+<([^>]+)>", doc.source):
+                        try:
+                            g, _n = env.get_closure(imp)
+                            for t in g:
+                                graph.add(t)
+                        except Exception:
+                            log.warning("completion: could not load import %s", imp)
+            _last_shapes[params.text_document.uri] = graph
+
+        items = _completion_items_for_prefix(graph, prefix, namespace)
+        return types.CompletionList(is_incomplete=False, items=items)
+    except Exception:
+        log.exception("completion failed")
+        return None
+
+
 def _report_to_diagnostics(
     report_graph: rdflib.Graph, text: str
 ) -> list[types.Diagnostic]:
@@ -388,6 +498,7 @@ def _validate_document(uri: str, progress_token: Optional[str]) -> bool:
         env = ENV.ensure(find_repo_root(path.parent))
         with ENV.lock:
             shapes, failed_imports = _build_shapes_graph(env, data_graph, path)
+        _last_shapes[uri] = shapes
 
         for imp_iri, err in failed_imports:
             line = _find_line(text, URIRef(imp_iri))
