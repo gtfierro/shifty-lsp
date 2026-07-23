@@ -337,15 +337,16 @@ def _report_to_diagnostics(
     return diagnostics
 
 
-def validate_document(uri: str) -> None:
+def validate_document(uri: str) -> bool:
+    """Validate a document; returns True if it conforms (no violations)."""
     token = _progress_begin("shifty-lsp", f"validating {os.path.basename(_uri_to_path(uri))}")
     try:
-        _validate_document(uri, token)
+        return _validate_document(uri, token)
     finally:
         _progress_end(token)
 
 
-def _validate_document(uri: str, progress_token: Optional[str]) -> None:
+def _validate_document(uri: str, progress_token: Optional[str]) -> bool:
     path = _uri_to_path(uri)
     try:
         text = server.workspace.get_text_document(uri).source
@@ -355,7 +356,7 @@ def _validate_document(uri: str, progress_token: Optional[str]) -> None:
             text = path.read_text()
         except Exception:
             log.exception("could not read %s", path)
-            return
+            return False
     diagnostics: list[types.Diagnostic] = []
 
     try:
@@ -380,7 +381,7 @@ def _validate_document(uri: str, progress_token: Optional[str]) -> None:
             )
         )
         _publish(uri, diagnostics)
-        return
+        return False
 
     try:
         _progress_report(progress_token, "resolving owl:imports…")
@@ -421,8 +422,14 @@ def _validate_document(uri: str, progress_token: Optional[str]) -> None:
             diagnostics.extend(_report_to_diagnostics(report_graph, text))
     except Exception:
         log.exception("validation failed for %s", uri)
+        conforms = False
 
     _publish(uri, diagnostics)
+    # Any error-severity diagnostic (failed import, validation error, parse
+    # error) means the document does not conform.
+    return conforms and not any(
+        d.severity == types.DiagnosticSeverity.Error for d in diagnostics
+    )
 
 
 CMD_REFRESH_ENVIRONMENT = "shifty-lsp.refreshEnvironment"
@@ -440,20 +447,30 @@ def refresh_environment(*args) -> None:
 
 
 @server.command(CMD_VALIDATE_WORKSPACE)
-def validate_workspace(*args) -> None:
+def validate_workspace(*args) -> bool:
     """Validate every .ttl file in the repository and publish diagnostics
-    for each one (including files that are not open in the editor)."""
+    for each one (including files that are not open in the editor).
+
+    Returns True if every file conforms, False otherwise."""
     log.info("command: validateWorkspace")
     root = ENV.root
     if root is None:
         docs = list(server.workspace.text_documents)
         if not docs:
-            return
+            return True
         root = find_repo_root(_uri_to_path(docs[0]).parent)
+    all_conform = True
     for ttl in sorted(root.rglob("*.ttl")):
         if ".ontoenv" in ttl.parts:
             continue
-        validate_document(ttl.as_uri())
+        try:
+            if not validate_document(ttl.as_uri()):
+                all_conform = False
+        except Exception:
+            log.exception("validation failed for %s", ttl)
+            all_conform = False
+    log.info("validateWorkspace result: %s", all_conform)
+    return all_conform
 
 
 def _publish(uri: str, diagnostics: list[types.Diagnostic]) -> None:

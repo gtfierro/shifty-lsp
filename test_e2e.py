@@ -163,8 +163,9 @@ def main():
         and m["params"]["uri"] == shapes_uri,
         timeout=60,
     )
-    reader.wait_for(lambda m: m.get("id") == 3)
-    print("OK: validateWorkspace command")
+    resp = reader.wait_for(lambda m: m.get("id") == 3)
+    print("OK: validateWorkspace command, result:", resp["result"])
+    assert resp["result"] is False, "expected workspace to not conform (data.ttl has a violation)"
 
     send(proc, {"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": None})
     reader.wait_for(lambda m: m.get("id") == 99)

@@ -2,87 +2,9 @@
   "nodes": [
     {
       "location": {
-        "url": "http://qudt.org/3.3.0/schema/datatype"
+        "url": "http://qudt.org/3.1.0/schema/facade/qudt"
       },
-      "name": "http://qudt.org/3.3.0/schema/datatype"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/3.3.0/vocab/dimensionvector"
-      },
-      "name": "http://qudt.org/3.3.0/vocab/dimensionvector"
-    },
-    {
-      "location": {
-        "url": "https://github.com/BrickSchema/Brick/releases/download/v1.5.0-rc1/Brick.ttl"
-      },
-      "name": "https://brickschema.org/schema/1.5/Brick"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/3.1.0/vocab/sou"
-      },
-      "name": "http://qudt.org/3.1.0/vocab/sou"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/3.1.0/schema/qudt"
-      },
-      "name": "http://qudt.org/3.1.0/schema/qudt"
-    },
-    {
-      "location": {
-        "url": "http://www.linkedmodel.org/schema/dtype"
-      },
-      "name": "http://www.linkedmodel.org/schema/dtype"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/2.1/vocab/quantitykind"
-      },
-      "name": "http://qudt.org/2.1/vocab/quantitykind"
-    },
-    {
-      "location": {
-        "url": "http://spinrdf.org/spl"
-      },
-      "name": "http://spinrdf.org/spl"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/2.1/schema/shacl/qudt"
-      },
-      "name": "http://qudt.org/2.1/schema/shacl/qudt"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/3.3.0/vocab/prefix"
-      },
-      "name": "http://qudt.org/3.3.0/vocab/prefix"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/3.1.0/schema/extensions/functions"
-      },
-      "name": "http://qudt.org/3.1.0/schema/extensions/functions"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/2.1/vocab/prefix"
-      },
-      "name": "http://qudt.org/2.1/vocab/prefix"
-    },
-    {
-      "location": {
-        "file": "/Users/gabe/src/shifty-lsp/iaq_sensor_deployment.ttl"
-      },
-      "name": "http://example.com/iaq_sensor_deployment"
-    },
-    {
-      "location": {
-        "url": "http://spinrdf.org/sp"
-      },
-      "name": "http://spinrdf.org/sp"
+      "name": "http://qudt.org/3.1.0/schema/facade/qudt"
     },
     {
       "location": {
@@ -92,93 +14,9 @@
     },
     {
       "location": {
-        "url": "http://qudt.org/2.1/vocab/dimensionvector"
-      },
-      "name": "http://qudt.org/2.1/vocab/dimensionvector"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/2.1/vocab/unit"
-      },
-      "name": "http://qudt.org/2.1/vocab/unit"
-    },
-    {
-      "location": {
-        "url": "https://brickschema.org/schema/1.4.4/Brick.ttl"
-      },
-      "name": "https://brickschema.org/schema/1.4/Brick"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/3.1.0/vocab/unit"
-      },
-      "name": "http://qudt.org/3.1.0/vocab/unit"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/3.3.0/vocab/soqk"
-      },
-      "name": "http://qudt.org/3.3.0/vocab/soqk"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/3.3.0/schema/facade/qudt"
-      },
-      "name": "http://qudt.org/3.3.0/schema/facade/qudt"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/2.1/schema/shacl/overlay/qudt"
-      },
-      "name": "http://qudt.org/2.1/schema/shacl/overlay/qudt"
-    },
-    {
-      "location": {
         "url": "http://qudt.org/2.1/schema/qudt"
       },
       "name": "http://qudt.org/2.1/schema/qudt"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/3.1.0/vocab/dimensionvector"
-      },
-      "name": "http://qudt.org/3.1.0/vocab/dimensionvector"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/3.3.0/vocab/unit"
-      },
-      "name": "http://qudt.org/3.3.0/vocab/unit"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/2.1/schema/extensions/functions"
-      },
-      "name": "http://qudt.org/2.1/schema/extensions/functions"
-    },
-    {
-      "location": {
-        "url": "http://qudt.org/3.3.0/schema/coordinateSystems"
-      },
-      "name": "http://qudt.org/3.3.0/schema/coordinateSystems"
-    },
-    {
-      "location": {
-        "url": "http://www.w3.org/ns/shacl#"
-      },
-      "name": "http://www.w3.org/ns/shacl#"
-    },
-    {
-      "location": {
-        "url": "http://www.linkedmodel.org/schema/vaem"
-      },
-      "name": "http://www.linkedmodel.org/schema/vaem"
-    },
-    {
-      "location": {
-        "url": "http://www.w3.org/2004/02/skos/core"
-      },
-      "name": "http://www.w3.org/2004/02/skos/core"
     },
     {
       "location": {
@@ -188,9 +26,15 @@
     },
     {
       "location": {
-        "url": "https://brickschema.org/schema/1.4/Brick.ttl"
+        "url": "http://spinrdf.org/sp"
       },
-      "name": "https://brickschema.org/schema/1.4/Brick"
+      "name": "http://spinrdf.org/sp"
+    },
+    {
+      "location": {
+        "url": "http://www.w3.org/ns/shacl#"
+      },
+      "name": "http://www.w3.org/ns/shacl#"
     },
     {
       "location": {
@@ -200,15 +44,9 @@
     },
     {
       "location": {
-        "url": "http://qudt.org/3.3.0/collection/usertest"
+        "url": "http://qudt.org/3.3.0/vocab/dimensionvector"
       },
-      "name": "http://qudt.org/3.3.0/collection/usertest"
-    },
-    {
-      "location": {
-        "url": "http://spinrdf.org/spin"
-      },
-      "name": "http://spinrdf.org/spin"
+      "name": "http://qudt.org/3.3.0/vocab/dimensionvector"
     },
     {
       "location": {
@@ -218,15 +56,27 @@
     },
     {
       "location": {
-        "url": "http://qudt.org/3.1.0/vocab/quantitykind"
+        "url": "http://www.linkedmodel.org/schema/vaem"
       },
-      "name": "http://qudt.org/3.1.0/vocab/quantitykind"
+      "name": "http://www.linkedmodel.org/schema/vaem"
     },
     {
       "location": {
-        "url": "http://qudt.org/3.1.0/schema/facade/qudt"
+        "url": "http://qudt.org/2.1/vocab/dimensionvector"
       },
-      "name": "http://qudt.org/3.1.0/schema/facade/qudt"
+      "name": "http://qudt.org/2.1/vocab/dimensionvector"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/2.1/schema/extensions/functions"
+      },
+      "name": "http://qudt.org/2.1/schema/extensions/functions"
+    },
+    {
+      "location": {
+        "url": "http://www.linkedmodel.org/schema/dtype"
+      },
+      "name": "http://www.linkedmodel.org/schema/dtype"
     },
     {
       "location": {
@@ -236,9 +86,159 @@
     },
     {
       "location": {
+        "url": "http://spinrdf.org/spl"
+      },
+      "name": "http://spinrdf.org/spl"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/2.1/schema/shacl/overlay/qudt"
+      },
+      "name": "http://qudt.org/2.1/schema/shacl/overlay/qudt"
+    },
+    {
+      "location": {
+        "url": "https://brickschema.org/schema/1.4/Brick.ttl"
+      },
+      "name": "https://brickschema.org/schema/1.4/Brick"
+    },
+    {
+      "location": {
+        "url": "https://brickschema.org/schema/1.4.4/Brick.ttl"
+      },
+      "name": "https://brickschema.org/schema/1.4/Brick"
+    },
+    {
+      "location": {
+        "url": "https://github.com/BrickSchema/Brick/releases/download/v1.5.0-rc1/Brick.ttl"
+      },
+      "name": "https://brickschema.org/schema/1.5/Brick"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.1.0/vocab/quantitykind"
+      },
+      "name": "http://qudt.org/3.1.0/vocab/quantitykind"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.3.0/schema/coordinateSystems"
+      },
+      "name": "http://qudt.org/3.3.0/schema/coordinateSystems"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/2.1/vocab/prefix"
+      },
+      "name": "http://qudt.org/2.1/vocab/prefix"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.1.0/vocab/sou"
+      },
+      "name": "http://qudt.org/3.1.0/vocab/sou"
+    },
+    {
+      "location": {
+        "url": "http://spinrdf.org/spin"
+      },
+      "name": "http://spinrdf.org/spin"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.3.0/collection/usertest"
+      },
+      "name": "http://qudt.org/3.3.0/collection/usertest"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.3.0/vocab/prefix"
+      },
+      "name": "http://qudt.org/3.3.0/vocab/prefix"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.3.0/schema/datatype"
+      },
+      "name": "http://qudt.org/3.3.0/schema/datatype"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/2.1/vocab/unit"
+      },
+      "name": "http://qudt.org/2.1/vocab/unit"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.1.0/vocab/unit"
+      },
+      "name": "http://qudt.org/3.1.0/vocab/unit"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.1.0/schema/extensions/functions"
+      },
+      "name": "http://qudt.org/3.1.0/schema/extensions/functions"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.3.0/schema/facade/qudt"
+      },
+      "name": "http://qudt.org/3.3.0/schema/facade/qudt"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.3.0/vocab/unit"
+      },
+      "name": "http://qudt.org/3.3.0/vocab/unit"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.1.0/schema/qudt"
+      },
+      "name": "http://qudt.org/3.1.0/schema/qudt"
+    },
+    {
+      "location": {
         "url": "http://qudt.org/3.3.0/vocab/quantitykind"
       },
       "name": "http://qudt.org/3.3.0/vocab/quantitykind"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/2.1/schema/shacl/qudt"
+      },
+      "name": "http://qudt.org/2.1/schema/shacl/qudt"
+    },
+    {
+      "location": {
+        "url": "http://www.w3.org/2004/02/skos/core"
+      },
+      "name": "http://www.w3.org/2004/02/skos/core"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/2.1/vocab/quantitykind"
+      },
+      "name": "http://qudt.org/2.1/vocab/quantitykind"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.3.0/vocab/soqk"
+      },
+      "name": "http://qudt.org/3.3.0/vocab/soqk"
+    },
+    {
+      "location": {
+        "file": "/Users/gabe/src/shifty-lsp/iaq_sensor_deployment.ttl"
+      },
+      "name": "http://example.com/iaq_sensor_deployment"
+    },
+    {
+      "location": {
+        "url": "http://qudt.org/3.1.0/vocab/dimensionvector"
+      },
+      "name": "http://qudt.org/3.1.0/vocab/dimensionvector"
     }
   ],
   "node_holes": [],
@@ -246,322 +246,317 @@
   "edges": [
     [
       0,
-      29,
-      null
-    ],
-    [
-      0,
-      28,
-      null
-    ],
-    [
-      0,
-      5,
-      null
-    ],
-    [
-      1,
-      20,
-      null
-    ],
-    [
-      2,
-      24,
-      null
-    ],
-    [
-      2,
-      39,
-      null
-    ],
-    [
-      3,
       32,
       null
     ],
     [
-      3,
-      37,
-      null
-    ],
-    [
-      4,
+      0,
       29,
       null
     ],
     [
-      4,
-      28,
+      1,
+      25,
       null
     ],
     [
-      4,
-      5,
-      null
-    ],
-    [
-      5,
-      28,
-      null
-    ],
-    [
-      6,
-      15,
-      null
-    ],
-    [
-      6,
+      1,
       30,
       null
     ],
     [
-      7,
-      34,
+      2,
+      35,
       null
     ],
     [
-      8,
-      27,
-      null
-    ],
-    [
-      8,
-      29,
-      null
-    ],
-    [
-      8,
-      28,
-      null
-    ],
-    [
-      8,
-      5,
-      null
-    ],
-    [
-      8,
-      21,
-      null
-    ],
-    [
+      2,
       9,
+      null
+    ],
+    [
+      2,
+      12,
+      null
+    ],
+    [
+      3,
+      11,
+      null
+    ],
+    [
+      3,
+      2,
+      null
+    ],
+    [
+      6,
+      0,
+      null
+    ],
+    [
+      7,
+      30,
+      null
+    ],
+    [
+      8,
+      35,
+      null
+    ],
+    [
+      8,
+      9,
+      null
+    ],
+    [
+      8,
+      12,
+      null
+    ],
+    [
+      8,
+      26,
+      null
+    ],
+    [
+      8,
       20,
       null
     ],
     [
       10,
-      7,
+      3,
       null
     ],
     [
       11,
-      30,
+      14,
       null
     ],
     [
       12,
-      2,
-      null
-    ],
-    [
-      14,
       9,
       null
     ],
     [
-      14,
-      20,
+      13,
+      21,
       null
     ],
     [
-      15,
-      30,
-      null
-    ],
-    [
-      16,
-      38,
-      null
-    ],
-    [
-      16,
-      6,
-      null
-    ],
-    [
-      16,
-      11,
-      null
-    ],
-    [
-      16,
-      30,
-      null
-    ],
-    [
-      17,
-      18,
-      null
-    ],
-    [
-      17,
-      36,
-      null
-    ],
-    [
-      18,
+      13,
       3,
       null
     ],
     [
-      18,
-      36,
-      null
-    ],
-    [
-      18,
-      32,
-      null
-    ],
-    [
-      18,
-      37,
-      null
-    ],
-    [
-      19,
       14,
+      23,
       null
     ],
     [
-      19,
-      20,
+      15,
+      5,
       null
     ],
     [
-      20,
-      35,
+      15,
+      34,
       null
     ],
     [
-      20,
-      33,
-      null
-    ],
-    [
-      21,
+      16,
       27,
       null
     ],
     [
-      21,
-      8,
-      null
-    ],
-    [
-      22,
-      29,
-      null
-    ],
-    [
-      22,
-      28,
-      null
-    ],
-    [
-      22,
-      5,
-      null
-    ],
-    [
-      23,
-      37,
-      null
-    ],
-    [
-      24,
-      14,
-      null
-    ],
-    [
-      24,
-      39,
-      null
-    ],
-    [
-      24,
-      9,
-      null
-    ],
-    [
-      24,
-      20,
-      null
-    ],
-    [
-      25,
-      7,
-      null
-    ],
-    [
-      26,
-      29,
-      null
-    ],
-    [
-      26,
-      28,
-      null
-    ],
-    [
-      26,
-      5,
-      null
-    ],
-    [
-      30,
-      25,
-      null
-    ],
-    [
-      30,
-      22,
-      null
-    ],
-    [
-      31,
       16,
+      13,
       null
     ],
     [
-      31,
-      38,
+      16,
+      36,
       null
     ],
     [
-      31,
-      6,
+      16,
+      21,
       null
     ],
     [
-      31,
-      11,
+      16,
+      10,
       null
     ],
     [
-      31,
+      16,
+      34,
+      null
+    ],
+    [
+      16,
       15,
       null
     ],
     [
+      16,
+      3,
+      null
+    ],
+    [
+      17,
+      28,
+      null
+    ],
+    [
+      17,
+      19,
+      null
+    ],
+    [
+      18,
       31,
+      null
+    ],
+    [
+      18,
+      33,
+      null
+    ],
+    [
+      19,
+      39,
+      null
+    ],
+    [
+      19,
+      0,
+      null
+    ],
+    [
+      20,
+      35,
+      null
+    ],
+    [
+      20,
+      9,
+      null
+    ],
+    [
+      20,
+      12,
+      null
+    ],
+    [
+      21,
+      3,
+      null
+    ],
+    [
+      22,
+      6,
+      null
+    ],
+    [
+      22,
+      0,
+      null
+    ],
+    [
+      23,
+      4,
+      null
+    ],
+    [
+      25,
+      30,
+      null
+    ],
+    [
+      26,
+      35,
+      null
+    ],
+    [
+      26,
+      9,
+      null
+    ],
+    [
+      26,
+      12,
+      null
+    ],
+    [
+      27,
+      13,
+      null
+    ],
+    [
+      27,
+      36,
+      null
+    ],
+    [
+      27,
+      21,
+      null
+    ],
+    [
+      27,
+      3,
+      null
+    ],
+    [
+      28,
+      22,
+      null
+    ],
+    [
+      28,
+      19,
+      null
+    ],
+    [
+      28,
+      6,
+      null
+    ],
+    [
+      28,
+      0,
+      null
+    ],
+    [
+      29,
+      14,
+      null
+    ],
+    [
+      30,
       8,
       null
     ],
     [
+      30,
+      24,
+      null
+    ],
+    [
       31,
-      21,
+      1,
+      null
+    ],
+    [
+      31,
+      33,
+      null
+    ],
+    [
+      31,
+      25,
       null
     ],
     [
@@ -571,82 +566,87 @@
     ],
     [
       32,
+      35,
+      null
+    ],
+    [
+      32,
+      9,
+      null
+    ],
+    [
+      32,
+      12,
+      null
+    ],
+    [
+      33,
       37,
       null
     ],
     [
-      34,
-      13,
+      33,
+      7,
       null
     ],
     [
-      35,
-      29,
-      null
-    ],
-    [
-      35,
-      28,
-      null
-    ],
-    [
-      35,
-      5,
-      null
-    ],
-    [
-      35,
-      0,
-      null
-    ],
-    [
-      35,
-      26,
-      null
-    ],
-    [
-      36,
-      23,
-      null
-    ],
-    [
-      36,
-      37,
-      null
-    ],
-    [
-      37,
-      4,
-      null
-    ],
-    [
-      37,
-      10,
-      null
-    ],
-    [
-      38,
-      11,
-      null
-    ],
-    [
-      38,
+      33,
       30,
       null
     ],
     [
-      39,
-      19,
+      34,
+      5,
       null
     ],
     [
-      39,
+      34,
+      35,
+      null
+    ],
+    [
+      34,
+      9,
+      null
+    ],
+    [
+      34,
+      12,
+      null
+    ],
+    [
+      34,
+      15,
+      null
+    ],
+    [
+      36,
+      10,
+      null
+    ],
+    [
+      36,
+      3,
+      null
+    ],
+    [
+      37,
       1,
       null
     ],
     [
+      37,
+      30,
+      null
+    ],
+    [
+      38,
+      18,
+      null
+    ],
+    [
       39,
-      20,
+      0,
       null
     ]
   ]
