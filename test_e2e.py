@@ -151,21 +151,25 @@ def main():
     reader.wait_for(lambda m: m.get("id") == 2)
     print("OK: refreshEnvironment command")
 
-    # workspace/executeCommand: validateWorkspace should publish diagnostics
-    # for shapes.ttl too (a file that is not open in the editor)
-    shapes_uri = Path(os.path.realpath(tmp / "shapes.ttl")).as_uri()
+    # workspace/executeCommand: validateFile returns conforms=false for data.ttl
     send(proc, {
         "jsonrpc": "2.0", "id": 3, "method": "workspace/executeCommand",
-        "params": {"command": "shifty-lsp.validateWorkspace", "arguments": []},
+        "params": {"command": "shifty-lsp.validateFile",
+                   "arguments": [{"uri": data_path.as_uri()}]},
     })
-    reader.wait_for(
-        lambda m: m.get("method") == "textDocument/publishDiagnostics"
-        and m["params"]["uri"] == shapes_uri,
-        timeout=60,
-    )
     resp = reader.wait_for(lambda m: m.get("id") == 3)
-    print("OK: validateWorkspace command, result:", resp["result"])
-    assert resp["result"] is False, "expected workspace to not conform (data.ttl has a violation)"
+    print("OK: validateFile command, result:", resp["result"])
+    assert resp["result"] is False, "expected data.ttl to not conform"
+
+    # validateFile on the conforming shapes.ttl returns true
+    send(proc, {
+        "jsonrpc": "2.0", "id": 4, "method": "workspace/executeCommand",
+        "params": {"command": "shifty-lsp.validateFile",
+                   "arguments": [(tmp / "shapes.ttl").as_uri()]},
+    })
+    resp = reader.wait_for(lambda m: m.get("id") == 4)
+    print("OK: validateFile(shapes.ttl), result:", resp["result"])
+    assert resp["result"] is True, "expected shapes.ttl to conform"
 
     send(proc, {"jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": None})
     reader.wait_for(lambda m: m.get("id") == 99)

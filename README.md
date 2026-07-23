@@ -42,10 +42,28 @@ Executable via `workspace/executeCommand` from your editor:
 
 - `shifty-lsp.refreshEnvironment` — re-scan the repository and rebuild the ontoenv
   environment, then revalidate all open documents.
-- `shifty-lsp.validateWorkspace` — validate every `.ttl` file in the repository (open or
-  not) and publish diagnostics for each.
+- `shifty-lsp.validateFile` — validate a single file (pass the document URI as the first
+  argument; defaults to the current document) and publish diagnostics. Returns `true` if
+  the file conforms, `false` otherwise.
 
-In Neovim: `:lua vim.lsp.buf.execute_command({ command = "shifty-lsp.validateWorkspace" })`.
+In Neovim:
+
+```lua
+-- fire and forget
+vim.lsp.buf.execute_command({
+  command = "shifty-lsp.validateFile",
+  arguments = { vim.uri_from_bufnr(0) },
+})
+
+-- get the true/false result
+local res = vim.lsp.buf_request_sync(0, "workspace/executeCommand", {
+  command = "shifty-lsp.validateFile",
+  arguments = { vim.uri_from_bufnr(0) },
+}, 60000)
+for _, r in pairs(res or {}) do
+  print("conforms:", r.result)
+end
+```
 
 ## Editor setup
 

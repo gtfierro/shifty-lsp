@@ -433,7 +433,7 @@ def _validate_document(uri: str, progress_token: Optional[str]) -> bool:
 
 
 CMD_REFRESH_ENVIRONMENT = "shifty-lsp.refreshEnvironment"
-CMD_VALIDATE_WORKSPACE = "shifty-lsp.validateWorkspace"
+CMD_VALIDATE_FILE = "shifty-lsp.validateFile"
 
 
 @server.command(CMD_REFRESH_ENVIRONMENT)
@@ -446,31 +446,31 @@ def refresh_environment(*args) -> None:
         _schedule_validation(uri)
 
 
-@server.command(CMD_VALIDATE_WORKSPACE)
-def validate_workspace(*args) -> bool:
-    """Validate every .ttl file in the repository and publish diagnostics
-    for each one (including files that are not open in the editor).
+@server.command(CMD_VALIDATE_FILE)
+def validate_file(*args) -> bool:
+    """Validate a single file (the current document) and publish diagnostics.
 
-    Returns True if every file conforms, False otherwise."""
-    log.info("command: validateWorkspace")
-    root = ENV.root
-    if root is None:
+    Expects the document URI as the first argument. Returns True if the file
+    conforms, False otherwise."""
+    log.info("command: validateFile")
+    uri: Optional[str] = None
+    if args and isinstance(args[0], dict):
+        # clients often pass the TextDocumentIdentifier
+        uri = args[0].get("uri")
+    elif args and isinstance(args[0], str):
+        uri = args[0]
+    if uri is None:
         docs = list(server.workspace.text_documents)
         if not docs:
             return True
-        root = find_repo_root(_uri_to_path(docs[0]).parent)
-    all_conform = True
-    for ttl in sorted(root.rglob("*.ttl")):
-        if ".ontoenv" in ttl.parts:
-            continue
-        try:
-            if not validate_document(ttl.as_uri()):
-                all_conform = False
-        except Exception:
-            log.exception("validation failed for %s", ttl)
-            all_conform = False
-    log.info("validateWorkspace result: %s", all_conform)
-    return all_conform
+        uri = docs[0]
+    try:
+        conforms = validate_document(uri)
+    except Exception:
+        log.exception("validation failed for %s", uri)
+        conforms = False
+    log.info("validateFile(%s) -> %s", uri, conforms)
+    return conforms
 
 
 def _publish(uri: str, diagnostics: list[types.Diagnostic]) -> None:
