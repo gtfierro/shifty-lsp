@@ -45,7 +45,7 @@
 
 <http://example.com/iaq_sensor_deployment> a owl:Ontology ;
     rdfs:label "Residential IAQ sensor deployment" ;
-    owl:imports <https://brickschema.org/schema/1.4/Brick.ttl> .
+    owl:imports <https://github.com/BrickSchema/Brick/releases/download/v1.5.0-rc1/Brick.ttl> .
 
 ####################################################################################
 # 2. Site, building, levels, and rooms
@@ -177,7 +177,7 @@
 
 :kitchen_stove_iaq_device a brick:IAQ_Sensor_Equipment ;
     rdfs:label "Kitchen IAQ sensor equipment near stove" ;
-    rec:locatedIn :kitchen_stove_co2 ;
+    rec:locatedIn :kitchen_stove_co ;
     rec:modelNumber "AS-9000" ;
     rec:serialNumber "AS9000-0001" ;
     rec:IPAddress "192.168.1.101" ;

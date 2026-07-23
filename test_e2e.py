@@ -72,6 +72,11 @@ class Reader:
         while time.time() < deadline:
             with self.lock:
                 for m in self.messages:
+                    # auto-answer server->client requests (e.g. progress token creation)
+                    if m.get("method") == "window/workDoneProgress/create" and "id" in m:
+                        if not m.pop("_answered", None):
+                            m["_answered"] = True
+                            send(self.proc, {"jsonrpc": "2.0", "id": m["id"], "result": None})
                     if pred(m):
                         return m
             time.sleep(0.1)
@@ -102,7 +107,7 @@ def main():
             "processId": None,
             "rootUri": tmp.as_uri(),
             "workspaceFolders": [{"uri": tmp.as_uri(), "name": "test"}],
-            "capabilities": {},
+            "capabilities": {"window": {"workDoneProgress": True}},
         },
     })
     reader.wait_for(lambda m: m.get("id") == 1)
@@ -130,6 +135,13 @@ def main():
     assert any(d["severity"] == 1 for d in diags), "expected an error diagnostic"
     assert any("name" in d["message"] or "Person" in d["message"] for d in diags)
     print(f"\nOK: got {len(diags)} diagnostic(s)")
+
+    # progress notifications should have been emitted
+    begins = [m for m in reader.messages if m.get("method") == "$/progress"
+              and m["params"]["value"].get("kind") == "begin"]
+    assert begins, "expected $/progress begin notifications"
+    print(f"OK: got {len(begins)} progress notification(s): "
+          + begins[0]["params"]["value"]["title"])
 
     # workspace/executeCommand: refreshEnvironment
     send(proc, {

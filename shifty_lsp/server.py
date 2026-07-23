@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import threading
+import uuid
 from pathlib import Path
 from typing import Optional
 from urllib.parse import unquote, urlparse
@@ -93,6 +94,45 @@ ENV = EnvironmentManager()
 
 server = LanguageServer("shifty-lsp", __version__)
 
+# Set during initialize: does the client support window/workDoneProgress?
+_client_work_done_progress = False
+
+
+def _progress_begin(title: str, message: Optional[str] = None) -> Optional[str]:
+    """Start a work-done progress notification; returns the token (or None if
+    the client doesn't support progress)."""
+    if not _client_work_done_progress:
+        return None
+    token = f"shifty-lsp-{uuid.uuid4()}"
+    try:
+        server.work_done_progress.create(token).result(timeout=5)
+        server.work_done_progress.begin(
+            token,
+            types.WorkDoneProgressBegin(title=title, message=message, cancellable=False),
+        )
+        return token
+    except Exception:
+        log.debug("could not create progress token", exc_info=True)
+        return None
+
+
+def _progress_report(token: Optional[str], message: str) -> None:
+    if token is None:
+        return
+    try:
+        server.work_done_progress.report(token, types.WorkDoneProgressReport(message=message))
+    except Exception:
+        log.debug("progress report failed", exc_info=True)
+
+
+def _progress_end(token: Optional[str], message: Optional[str] = None) -> None:
+    if token is None:
+        return
+    try:
+        server.work_done_progress.end(token, types.WorkDoneProgressEnd(message=message))
+    except Exception:
+        log.debug("progress end failed", exc_info=True)
+
 # uri -> threading.Timer for debounced validation
 _timers: dict[str, threading.Timer] = {}
 _timers_lock = threading.Lock()
@@ -111,6 +151,9 @@ def _schedule_validation(uri: str) -> None:
 
 @server.feature(types.INITIALIZE)
 def on_initialize(params: types.InitializeParams) -> None:
+    global _client_work_done_progress
+    if params.capabilities.window and params.capabilities.window.work_done_progress:
+        _client_work_done_progress = True
     root: Optional[Path] = None
     if params.workspace_folders:
         root = _uri_to_path(params.workspace_folders[0].uri)
@@ -295,6 +338,14 @@ def _report_to_diagnostics(
 
 
 def validate_document(uri: str) -> None:
+    token = _progress_begin("shifty-lsp", f"validating {os.path.basename(_uri_to_path(uri))}")
+    try:
+        _validate_document(uri, token)
+    finally:
+        _progress_end(token)
+
+
+def _validate_document(uri: str, progress_token: Optional[str]) -> None:
     path = _uri_to_path(uri)
     try:
         text = server.workspace.get_text_document(uri).source
@@ -332,6 +383,7 @@ def validate_document(uri: str) -> None:
         return
 
     try:
+        _progress_report(progress_token, "resolving owl:imports…")
         env = ENV.ensure(find_repo_root(path.parent))
         with ENV.lock:
             shapes, failed_imports = _build_shapes_graph(env, data_graph, path)
@@ -356,9 +408,15 @@ def validate_document(uri: str) -> None:
             len(data_graph),
             len(shapes),
         )
+        _progress_report(
+            progress_token,
+            f"shifty: inference + validation ({len(data_graph)} data triples, "
+            f"{len(shapes)} shape triples)…",
+        )
         conforms, report_graph, _text = shifty.validate(
             data_graph, shapes if len(shapes) else None, infer=True
         )
+        _progress_report(progress_token, "publishing diagnostics…")
         if not conforms:
             diagnostics.extend(_report_to_diagnostics(report_graph, text))
     except Exception:
