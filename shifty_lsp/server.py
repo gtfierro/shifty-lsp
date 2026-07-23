@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 from pathlib import Path
 from typing import Optional
@@ -173,12 +174,41 @@ def _ontology_iri(graph: rdflib.Graph) -> Optional[str]:
     return None
 
 
+def _check_imports(
+    env: OntoEnv, imports: list[str]
+) -> tuple[list[str], list[tuple[str, str]]]:
+    """Ensure every declared import is present in the environment, fetching
+    it if necessary. Returns (resolved_iris, [(iri, error_message), ...])."""
+    resolved: list[str] = []
+    failed: list[tuple[str, str]] = []
+    for imp in imports:
+        try:
+            env.get_graph(imp)
+            resolved.append(imp)
+            continue
+        except Exception:
+            pass
+        # Not cached: try to download it and capture the failure reason
+        try:
+            env.add(imp, fetch_imports=True)
+            resolved.append(imp)
+        except Exception as e:
+            log.warning("import %s failed: %s", imp, e)
+            failed.append((imp, str(e)))
+    return resolved, failed
+
+
 def _build_shapes_graph(
     env: OntoEnv, data_graph: rdflib.Graph, doc_path: Path
-) -> rdflib.Graph:
+) -> tuple[rdflib.Graph, list[tuple[str, str]]]:
     """Resolve the document's owl:imports (downloading if needed) and merge
-    the transitive closure of all imports into a shapes graph."""
+    the transitive closure of all imports into a shapes graph.
+
+    Returns (shapes_graph, failed_imports) where failed_imports is a list of
+    (import_iri, error_message) pairs for imports that could not be fetched."""
     shapes = rdflib.Graph()
+    failed: list[tuple[str, str]] = []
+    imports = _imports_of(data_graph)
 
     # Register the document itself so its imports are processed by ontoenv,
     # downloading anything not already cached.
@@ -186,6 +216,10 @@ def _build_shapes_graph(
         env.add(str(doc_path), fetch_imports=True)
     except Exception:
         log.exception("ontoenv add failed for %s", doc_path)
+
+    # Explicitly verify each declared import resolved; collect failures so
+    # they can be surfaced to the user as diagnostics.
+    resolved, failed = _check_imports(env, imports)
 
     ont_iri = _ontology_iri(data_graph)
     if ont_iri:
@@ -197,19 +231,19 @@ def _build_shapes_graph(
                 if t not in data_graph:
                     shapes.add(t)
             if len(shapes) > 0:
-                return shapes
+                return shapes, failed
         except Exception:
             log.exception("get_closure failed for %s", ont_iri)
 
-    # Fallback: fetch each import's closure individually
-    for imp in _imports_of(data_graph):
+    # Fallback: fetch each resolved import's closure individually
+    for imp in resolved:
         try:
             g, _n = env.get_closure(imp)
             for t in g:
                 shapes.add(t)
         except Exception:
-            log.warning("could not resolve import %s", imp)
-    return shapes
+            log.warning("could not build closure for import %s", imp)
+    return shapes, failed
 
 
 def _find_line(text: str, node: rdflib.term.Node) -> int:
@@ -277,13 +311,17 @@ def validate_document(uri: str) -> None:
         data_graph = rdflib.Graph()
         data_graph.parse(data=text, format="turtle")
     except Exception as e:
-        # Syntax error: report on first line (best effort without a parser
-        # that yields positions) and skip validation.
+        # Syntax error: extract the line number rdflib reports ("at line N")
+        # if available.
+        line = 0
+        m = re.search(r"at line (\d+)", str(e))
+        if m:
+            line = max(0, int(m.group(1)) - 1)
         diagnostics.append(
             types.Diagnostic(
                 range=types.Range(
-                    start=types.Position(line=0, character=0),
-                    end=types.Position(line=0, character=10**6),
+                    start=types.Position(line=line, character=0),
+                    end=types.Position(line=line, character=10**6),
                 ),
                 message=f"Turtle parse error: {e}",
                 severity=types.DiagnosticSeverity.Error,
@@ -296,7 +334,21 @@ def validate_document(uri: str) -> None:
     try:
         env = ENV.ensure(find_repo_root(path.parent))
         with ENV.lock:
-            shapes = _build_shapes_graph(env, data_graph, path)
+            shapes, failed_imports = _build_shapes_graph(env, data_graph, path)
+
+        for imp_iri, err in failed_imports:
+            line = _find_line(text, URIRef(imp_iri))
+            diagnostics.append(
+                types.Diagnostic(
+                    range=types.Range(
+                        start=types.Position(line=line, character=0),
+                        end=types.Position(line=line, character=10**6),
+                    ),
+                    message=f"owl:imports could not be resolved: {err}",
+                    severity=types.DiagnosticSeverity.Error,
+                    source="ontoenv",
+                )
+            )
 
         log.info(
             "validating %s (%d data triples, %d shapes triples)",

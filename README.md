@@ -25,8 +25,11 @@ This provides the `shifty-lsp` executable (stdio transport).
    opens/creates an ontoenv environment there (`.ontoenv/` directory). Opening any file
    automatically loads the environment and triggers validation — no manual setup needed.
 2. On document open/change (debounced ~0.8s) and save:
-   - The document is parsed with rdflib (parse errors become diagnostics).
+   - The document is parsed with rdflib (parse errors become diagnostics, positioned at
+     the line reported by the parser).
    - The file is registered with ontoenv, which downloads any missing `owl:imports`.
+     Imports that cannot be fetched (404, network error, etc.) are published as **error
+     diagnostics** on the `owl:imports` line, with the underlying error message.
    - The transitive import closure is materialized as the shapes graph.
    - `shifty.validate(data, shapes, infer=True)` runs SHACL-AF rules to a fixed point and
      validates; results are mapped to diagnostics, positioned at the line where the focus

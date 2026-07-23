@@ -1,7 +1,7 @@
 {
-  "root": "/Users/gabe/src/shifty-lsp",
+  "root": ".",
   "locations": [
-    "/Users/gabe/src/shifty-lsp"
+    "."
   ],
   "external_graph_store": null,
   "includes": [
