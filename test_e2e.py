@@ -143,6 +143,21 @@ def main():
     print(f"OK: got {len(begins)} progress notification(s): "
           + begins[0]["params"]["value"]["title"])
 
+    # textDocument/definition: cursor on the imported ontology IRI
+    import_line = next(i for i, l in enumerate(DATA_TTL.splitlines()) if "owl:imports" in l)
+    send(proc, {
+        "jsonrpc": "2.0", "id": 5, "method": "textDocument/definition",
+        "params": {
+            "textDocument": {"uri": data_path.as_uri()},
+            "position": {"line": import_line, "character": 20},
+        },
+    })
+    resp = reader.wait_for(lambda m: m.get("id") == 5)
+    got_uri = resp["result"]["uri"]
+    want_uri = Path(os.path.realpath(tmp / "shapes.ttl")).as_uri()
+    assert got_uri == want_uri, f"definition -> {got_uri}, want {want_uri}"
+    print("OK: definition ->", got_uri)
+
     # workspace/executeCommand: refreshEnvironment
     send(proc, {
         "jsonrpc": "2.0", "id": 2, "method": "workspace/executeCommand",

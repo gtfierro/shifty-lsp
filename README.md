@@ -46,24 +46,12 @@ Executable via `workspace/executeCommand` from your editor:
   argument; defaults to the current document) and publish diagnostics. Returns `true` if
   the file conforms, `false` otherwise.
 
-In Neovim:
+## Goto definition
 
-```lua
--- fire and forget
-vim.lsp.buf.execute_command({
-  command = "shifty-lsp.validateFile",
-  arguments = { vim.uri_from_bufnr(0) },
-})
-
--- get the true/false result
-local res = vim.lsp.buf_request_sync(0, "workspace/executeCommand", {
-  command = "shifty-lsp.validateFile",
-  arguments = { vim.uri_from_bufnr(0) },
-}, 60000)
-for _, r in pairs(res or {}) do
-  print("conforms:", r.result)
-end
-```
+`textDocument/definition` is supported: with the cursor on an ontology IRI or prefixed
+name (e.g. inside an `owl:imports <...>` statement), jump to that ontology's `.ttl` file.
+Local ontologies open directly; remote ones are materialized from the ontoenv store into
+`.ontoenv/lsp-cache/<name>.ttl` on first use and opened from there.
 
 ## Editor setup
 
@@ -72,15 +60,44 @@ end
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
   pattern = { "turtle", "ttl" },
-  callback = function()
+  callback = function(args)
     vim.lsp.start({
       name = "shifty-lsp",
       cmd = { "/path/to/shifty-lsp/.venv/bin/shifty-lsp" },
       root_dir = vim.fs.root(0, ".git") or vim.fn.getcwd(),
     })
+
+    -- inline diagnostics
+    vim.diagnostic.config({ virtual_text = true, signs = true, underline = true })
+
+    -- goto definition (jump to an ontology's .ttl from its IRI in owl:imports)
+    vim.keymap.set("n", "gd", vim.lsp.buf.definition, { buffer = args.buf, desc = "goto definition" })
+
+    -- validate the current file, showing the conforms result
+    vim.api.nvim_buf_create_user_command(args.buf, "ShiftyValidate", function()
+      local res = vim.lsp.buf_request_sync(0, "workspace/executeCommand", {
+        command = "shifty-lsp.validateFile",
+        arguments = { vim.uri_from_bufnr(0) },
+      }, 60000)
+      local conforms = res and next(res) and vim.iter(vim.tbl_values(res)):all(function(r) return r.result end)
+      vim.notify(conforms and "\226\156\147 conforms" or "\226\156\151 violations found",
+        conforms and vim.log.levels.INFO or vim.log.levels.ERROR)
+    end, {})
+
+    -- refresh the ontoenv environment
+    vim.api.nvim_buf_create_user_command(args.buf, "ShiftyRefreshEnv", function()
+      vim.lsp.buf.execute_command({ command = "shifty-lsp.refreshEnvironment" })
+    end, {})
+
+    vim.keymap.set("n", "<leader>ov", "<cmd>ShiftyValidate<cr>", { buffer = args.buf, desc = "shifty: validate file" })
+    vim.keymap.set("n", "<leader>or", "<cmd>ShiftyRefreshEnv<cr>", { buffer = args.buf, desc = "ontoenv: refresh environment" })
   end,
 })
 ```
+
+Progress during validation (import downloads, shifty runs) is reported via
+`window/workDoneProgress` — install [fidget.nvim](https://github.com/j-hui/fidget.nvim)
+to see it as a status widget.
 
 ### VS Code
 

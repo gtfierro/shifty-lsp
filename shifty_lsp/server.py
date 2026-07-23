@@ -432,6 +432,98 @@ def _validate_document(uri: str, progress_token: Optional[str]) -> bool:
     )
 
 
+def _iri_at_position(text: str, line: int, character: int) -> Optional[str]:
+    """Extract the IRI (angle-bracket or prefixed name) under the cursor."""
+    lines = text.splitlines()
+    if line >= len(lines):
+        return None
+    row = lines[line]
+    # angle-bracket IRI: <http://...>
+    for m in re.finditer(r"<([^<>\s]+)>", row):
+        if m.start() <= character <= m.end():
+            return m.group(1)
+    # prefixed name: foo:bar
+    for m in re.finditer(r"\b([A-Za-z_][\w-]*):([\w.-]+)", row):
+        if m.start() <= character <= m.end():
+            prefixes = dict(
+                re.findall(r"(?:@prefix|PREFIX)\s+([\w-]+):\s*<([^>]+)>", text)
+            )
+            base = prefixes.get(m.group(1))
+            if base:
+                return base + m.group(2)
+    return None
+
+
+def _materialize_remote(env: OntoEnv, name: str, location: str) -> Optional[str]:
+    """Serialize a remote ontology's graph out of the ontoenv store into a
+    local cache .ttl file so the editor can open it; returns the file URI."""
+    if ENV.root is None:
+        return None
+    cache_dir = ENV.root / ".ontoenv" / "lsp-cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") + ".ttl"
+    out = cache_dir / safe
+    if not out.exists():
+        try:
+            g = env.get_graph(name)
+            g.serialize(destination=str(out), format="turtle")
+            log.info("materialized %s -> %s", name, out)
+        except Exception:
+            log.exception("could not materialize %s", name)
+            return None
+    return out.as_uri()
+
+
+def _ontology_file(env: OntoEnv, iri: str) -> Optional[str]:
+    """Resolve an ontology IRI (or its source URL) to a local file URI the
+    editor can open."""
+    ont = None
+    try:
+        ont = env.get_ontology(iri)
+    except Exception:
+        # maybe the IRI is the *location* of a known ontology (e.g. the
+        # versioned download URL rather than the ontology name)
+        for name in env.get_ontology_names():
+            try:
+                candidate = env.get_ontology(name)
+            except Exception:
+                continue
+            if candidate.location == iri:
+                ont = candidate
+                break
+    if ont is None:
+        return None
+    if ont.location.startswith("file://"):
+        return ont.location
+    return _materialize_remote(env, ont.name, ont.location)
+
+
+@server.feature(types.TEXT_DOCUMENT_DEFINITION)
+def definition(params: types.DefinitionParams) -> Optional[types.Location]:
+    """Goto-definition: jump from an ontology IRI (e.g. in an owl:imports
+    statement) to the local .ttl file for that ontology. Remote ontologies
+    are materialized from the ontoenv store into .ontoenv/lsp-cache/."""
+    try:
+        doc = server.workspace.get_text_document(params.text_document.uri)
+        iri = _iri_at_position(doc.source, params.position.line, params.position.character)
+        if not iri:
+            return None
+        env = ENV.ensure(find_repo_root(_uri_to_path(params.text_document.uri).parent))
+        with ENV.lock:
+            target = _ontology_file(env, iri)
+        if target is None:
+            return None
+        zero = types.Range(
+            start=types.Position(line=0, character=0),
+            end=types.Position(line=0, character=0),
+        )
+        log.info("definition: %s -> %s", iri, target)
+        return types.Location(uri=target, range=zero)
+    except Exception:
+        log.exception("definition failed")
+        return None
+
+
 CMD_REFRESH_ENVIRONMENT = "shifty-lsp.refreshEnvironment"
 CMD_VALIDATE_FILE = "shifty-lsp.validateFile"
 
