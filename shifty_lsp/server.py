@@ -73,6 +73,7 @@ class EnvironmentManager:
                     search_directories=[str(root)],
                     includes=["*.ttl"],
                     strict=False,
+                    create_or_use_cached=True,
                 )
                 self.root = root
             return self.env
