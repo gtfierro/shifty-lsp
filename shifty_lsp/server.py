@@ -441,6 +441,60 @@ def _document_prefixes(text: str) -> dict[str, str]:
     return dict(re.findall(r"(?:@prefix|PREFIX)\s+([\w-]+):\s*<([^>]+)>", text))
 
 
+@server.feature(types.TEXT_DOCUMENT_HOVER)
+def hover(params: types.HoverParams) -> Optional[types.Hover]:
+    """Show documentation for the term under the cursor: rdfs:label,
+    rdfs:comment, types, and supertypes from the ontology environment."""
+    try:
+        doc = server.workspace.get_text_document(params.text_document.uri)
+        iri = _iri_at_position(doc.source, params.position.line, params.position.character)
+        if not iri:
+            return None
+        graph = _last_shapes.get(params.text_document.uri)
+        if graph is None:
+            # fall back to building the closure (imports recovered by regex if
+            # the buffer doesn't parse)
+            data_graph = rdflib.Graph()
+            try:
+                data_graph.parse(data=doc.source, format="turtle")
+            except Exception:
+                pass
+            env = ENV.ensure(find_repo_root(_uri_to_path(params.text_document.uri).parent))
+            with ENV.lock:
+                graph, _failed = _get_shapes(
+                    env, data_graph, _uri_to_path(params.text_document.uri),
+                    params.text_document.uri,
+                )
+            _last_shapes[params.text_document.uri] = graph
+
+        term = URIRef(iri)
+        sections: list[str] = []
+        label = graph.value(term, RDFS.label)
+        if label:
+            sections.append(f"**{label}**")
+        types_ = [t for t in graph.objects(term, RDF.type)]
+        if types_:
+            local = lambda u: str(u).rsplit("#", 1)[-1].rsplit("/", 1)[-1]
+            sections.append("Type: " + ", ".join(f"`{local(t)}`" for t in types_))
+        supers = [s for s in graph.objects(term, RDFS.subClassOf) if isinstance(s, URIRef)]
+        if supers:
+            local = lambda u: str(u).rsplit("#", 1)[-1].rsplit("/", 1)[-1]
+            sections.append("Subclass of: " + ", ".join(f"`{local(s)}`" for s in supers))
+        comment = graph.value(term, RDFS.comment)
+        if comment:
+            sections.append(str(comment))
+        if not sections:
+            return None
+        return types.Hover(
+            contents=types.MarkupContent(
+                kind=types.MarkupKind.Markdown, value="\n\n".join(sections)
+            )
+        )
+    except Exception:
+        log.exception("hover failed")
+        return None
+
+
 @server.feature(
     types.TEXT_DOCUMENT_COMPLETION,
     types.CompletionOptions(trigger_characters=[":"], resolve_provider=False),

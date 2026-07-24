@@ -16,8 +16,13 @@ SHAPES_TTL = """\
 @prefix ex: <http://example.org/> .
 @prefix owl: <http://www.w3.org/2002/07/owl#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 
 <http://example.org/shapes> a owl:Ontology .
+
+ex:Person a rdfs:Class ;
+    rdfs:label "Person" ;
+    rdfs:comment "A human being." .
 
 ex:PersonShape a sh:NodeShape ;
     sh:targetClass ex:Person ;
@@ -193,6 +198,20 @@ def main():
     labels = {i["label"] for i in resp["result"]["items"]}
     print("OK: completion items:", sorted(labels))
     assert "ex:Person" in labels and "ex:PersonShape" in labels and "ex:name" in labels
+
+    # textDocument/hover on ex:Person in data.ttl (defined in the imported ontology)
+    person_line = next(i for i, l in enumerate(DATA_TTL.splitlines()) if "ex:Alice" in l)
+    send(proc, {
+        "jsonrpc": "2.0", "id": 7, "method": "textDocument/hover",
+        "params": {
+            "textDocument": {"uri": data_path.as_uri()},
+            "position": {"line": person_line, "character": DATA_TTL.splitlines()[person_line].index("ex:Person") + 3},
+        },
+    })
+    resp = reader.wait_for(lambda m: m.get("id") == 7)
+    hover_md = resp["result"]["contents"]["value"]
+    print("OK: hover ->", hover_md.replace("\n", " "))
+    assert "Person" in hover_md and "A human being." in hover_md
 
     # workspace/executeCommand: refreshEnvironment
     send(proc, {

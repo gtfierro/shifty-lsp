@@ -100,6 +100,9 @@ vim.api.nvim_create_autocmd("FileType", {
     -- goto definition (jump to an ontology's .ttl from its IRI in owl:imports)
     vim.keymap.set("n", "gd", vim.lsp.buf.definition, { buffer = args.buf, desc = "goto definition" })
 
+    -- hover: label/comment/types for the term under the cursor
+    vim.keymap.set("n", "K", vim.lsp.buf.hover, { buffer = args.buf, desc = "hover docs" })
+
     -- jump between diagnostics from the cursor position (float shows the message)
     vim.keymap.set("n", "]e", function()
       vim.diagnostic.jump({ count = 1, float = true })
