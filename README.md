@@ -263,7 +263,16 @@ use a generic LSP client extension and point it at the `shifty-lsp` executable f
 
 ## Development
 
+Everything goes through the Makefile:
+
 ```sh
-uv venv && uv pip install -e . 
-.venv/bin/python test_e2e.py   # end-to-end LSP smoke test
+make dev     # set up .venv and install the package (editable)
+make test    # run the end-to-end LSP test
+make build   # build the Python wheel/sdist + the VS Code .vsix
+make clean   # remove all build artifacts
+make publish # build + publish to PyPI
 ```
+
+CI (GitHub Actions, `.github/workflows/ci.yml`) runs the e2e test on every push/PR,
+builds the wheel and `.vsix` as downloadable artifacts, and publishes to PyPI when a
+`v*` tag is pushed (via trusted publishing or a `PYPI_TOKEN` secret).
