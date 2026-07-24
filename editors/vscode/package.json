@@ -1,0 +1,52 @@
+{
+  "name": "shifty-lsp",
+  "displayName": "shifty-lsp",
+  "description": "Turtle/RDF ontology support: SHACL validation via shifty, owl:imports management via ontoenv",
+  "version": "0.1.0",
+  "publisher": "gtfierro",
+  "license": "BSD-3-Clause",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:turtle"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "turtle",
+        "aliases": ["Turtle", "turtle"],
+        "extensions": [".ttl"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "shifty-lsp.validateFile",
+        "title": "Shifty: Validate File"
+      },
+      {
+        "command": "shifty-lsp.refreshEnvironment",
+        "title": "Shifty: Refresh Ontology Environment"
+      }
+    ],
+    "configuration": {
+      "title": "shifty-lsp",
+      "properties": {
+        "shifty-lsp.path": {
+          "type": "string",
+          "default": "shifty-lsp",
+          "description": "Path to the shifty-lsp executable"
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

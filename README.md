@@ -28,11 +28,43 @@ A language server for Turtle/RDF ontology files, combining:
 
 ## Install
 
+**The server** (Python 3.10+, provides the `shifty-lsp` executable on your PATH):
+
 ```sh
-pip install -e .
+# from PyPI (once published)
+pipx install shifty-lsp
+
+# or straight from the repo
+pipx install git+https://github.com/gtfierro/shifty-lsp
+# or: uv tool install git+https://github.com/gtfierro/shifty-lsp
 ```
 
-This provides the `shifty-lsp` executable (stdio transport).
+**Neovim plugin** (Neovim ≥ 0.11, ships an `lsp/` config):
+
+```lua
+vim.pack.add({ "https://github.com/gtfierro/shifty-lsp" })
+require("shifty_lsp").setup()   -- keymaps, commands, diagnostics (all optional)
+vim.lsp.enable("shifty-lsp")
+```
+
+`setup()` accepts `{ keymaps = false, commands = false, diagnostics = false }` to
+disable any part. The plugin also registers `.ttl` as the `turtle` filetype.
+
+**VS Code extension**: a prebuilt `.vsix` lives in `editors/vscode/`. Install with:
+
+```sh
+code --install-extension editors/vscode/shifty-lsp-0.1.0.vsix
+```
+
+or rebuild it yourself:
+
+```sh
+cd editors/vscode && npm install && npx @vscode/vsce package
+```
+
+It adds Turtle language support, starts the server for `.ttl` files (configurable via
+the `shifty-lsp.path` setting), and exposes *Shifty: Validate File* and *Shifty: Refresh
+Ontology Environment* commands in the command palette.
 
 ## How it works
 
@@ -115,7 +147,7 @@ Local ontologies open directly; remote ones are materialized from the ontoenv st
 
 ## Editor setup
 
-### Neovim (nvim-lspconfig style)
+### Neovim (manual setup, without the plugin)
 
 ```lua
 vim.api.nvim_create_autocmd("FileType", {
@@ -225,8 +257,9 @@ vim.api.nvim_create_autocmd("LspProgress", {
 
 ### VS Code
 
-Use a generic LSP client extension (e.g. *Generic LSP Client*) and point it at the
-`shifty-lsp` executable for `.ttl` files.
+Install the extension from `editors/vscode/` (see [Install](#install)). Alternatively,
+use a generic LSP client extension and point it at the `shifty-lsp` executable for
+`.ttl` files.
 
 ## Development
 

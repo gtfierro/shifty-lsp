@@ -4,3 +4,5 @@ __pycache__/
 dist/
 build/
 .ontoenv/
+editors/vscode/node_modules/
+editors/vscode/package-lock.json
