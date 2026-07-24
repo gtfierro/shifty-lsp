@@ -621,6 +621,24 @@ def _validate_document(uri: str, progress_token: Optional[str]) -> bool:
         log.info("discarding stale validation results for %s", path.name)
         return conforms
     _publish(uri, diagnostics)
+    n_errors = sum(1 for d in diagnostics if d.severity == types.DiagnosticSeverity.Error)
+    n_warnings = sum(
+        1 for d in diagnostics if d.severity == types.DiagnosticSeverity.Warning
+    )
+    if not diagnostics:
+        summary = f"{path.name}: conforms \u2713"
+        msg_type = types.MessageType.Info
+    else:
+        summary = f"{path.name}: {n_errors} error(s), {n_warnings} warning(s)"
+        msg_type = (
+            types.MessageType.Error if n_errors else types.MessageType.Warning
+        )
+    try:
+        server.window_show_message(
+            types.ShowMessageParams(type=msg_type, message=f"shifty: {summary}")
+        )
+    except Exception:
+        log.debug("show_message failed", exc_info=True)
     # Any error-severity diagnostic (failed import, validation error, parse
     # error) means the document does not conform.
     return conforms and not any(

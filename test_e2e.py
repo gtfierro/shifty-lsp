@@ -143,6 +143,14 @@ def main():
     print(f"OK: got {len(begins)} progress notification(s): "
           + begins[0]["params"]["value"]["title"])
 
+    # a window/showMessage notification should accompany validation
+    msg = reader.wait_for(
+        lambda m: m.get("method") == "window/showMessage"
+        and "shifty:" in m["params"]["message"],
+        timeout=30,
+    )
+    print("OK: showMessage:", msg["params"]["message"])
+
     # textDocument/definition: cursor on the imported ontology IRI
     import_line = next(i for i, l in enumerate(DATA_TTL.splitlines()) if "owl:imports" in l)
     send(proc, {
