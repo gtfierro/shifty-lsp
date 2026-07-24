@@ -98,7 +98,7 @@
 
 :bedroom a rec:Bedroom ;
     rdfs:label "Bedroom" ;
-    rec:area :bedroom_area .
+    brick:hasPoint :bedroom_area .
 
 :bedroom_area a rec:ArchitectureArea ;
     rec:netArea "16.0"^^xsd:float .

@@ -508,11 +508,10 @@ def _report_to_diagnostics(
         path = report_graph.value(result, SH.resultPath)
         if path is not None:
             message += f" (path: {path})"
-        # Report on both the focus node and the value node, at every line
-        # where each appears in the document.
-        lines = _find_lines(text, focus) if focus is not None else {0}
-        if value is not None:
-            lines |= _find_lines(text, value)
+        # If the violation identifies a specific offending value, report on
+        # the value node; otherwise report on the focus node.
+        target = value if value is not None else focus
+        lines = _find_lines(text, target) if target is not None else {0}
         for line in sorted(lines):
             rng = types.Range(
                 start=types.Position(line=line, character=0),
