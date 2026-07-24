@@ -184,7 +184,7 @@
     rec:MACAddress "A4:CF:12:00:00:01" ;
     brick:hosts :kitchen_stove_co2,
         :kitchen_stove_pm2_5,
-        :kitchen_stove_pm10,
+        :kitchen_stove,
         :kitchen_stove_tvoc,
         :kitchen_stove_no2,
         :kitchen_stove_co,

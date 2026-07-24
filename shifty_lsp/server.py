@@ -88,6 +88,7 @@ class EnvironmentManager:
                     self.env.update()
                 except Exception:
                     log.exception("ontoenv update failed")
+        _invalidate_shapes_cache()
 
 
 ENV = EnvironmentManager()
@@ -311,6 +312,32 @@ def _find_line(text: str, node: rdflib.term.Node) -> int:
 # uri -> most recent shapes graph used for validation (drives completion)
 _last_shapes: dict[str, rdflib.Graph] = {}
 
+# Shapes-graph cache: uri -> (generation, sorted imports, shapes, failed imports).
+# Building the merged closure graph is expensive (100k+ triples), so we reuse
+# it across validations until the environment changes or the document's
+# owl:imports change.
+_shapes_cache: dict[str, tuple[int, tuple[str, ...], rdflib.Graph, list]] = {}
+_env_generation = 0
+
+
+def _invalidate_shapes_cache() -> None:
+    global _env_generation
+    _env_generation += 1
+    _shapes_cache.clear()
+    _last_shapes.clear()
+
+
+def _get_shapes(env: OntoEnv, data_graph: rdflib.Graph, doc_path: Path, uri: str):
+    """Like _build_shapes_graph, but cached per document."""
+    imports = tuple(sorted(_imports_of(data_graph)))
+    cached = _shapes_cache.get(uri)
+    if cached is not None and cached[0] == _env_generation and cached[1] == imports:
+        log.info("shapes cache hit for %s", doc_path.name)
+        return cached[2], list(cached[3])
+    shapes, failed = _build_shapes_graph(env, data_graph, doc_path)
+    _shapes_cache[uri] = (_env_generation, imports, shapes, list(failed))
+    return shapes, failed
+
 RDFS = rdflib.Namespace("http://www.w3.org/2000/01/rdf-schema#")
 
 _TYPE_KINDS = {
@@ -506,7 +533,7 @@ def _validate_document(uri: str, progress_token: Optional[str]) -> bool:
         _progress_report(progress_token, "resolving owl:imports…")
         env = ENV.ensure(find_repo_root(path.parent))
         with ENV.lock:
-            shapes, failed_imports = _build_shapes_graph(env, data_graph, path)
+            shapes, failed_imports = _get_shapes(env, data_graph, path, uri)
         _last_shapes[uri] = shapes
 
         for imp_iri, err in failed_imports:
