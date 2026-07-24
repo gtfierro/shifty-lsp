@@ -32,11 +32,10 @@ A language server for Turtle/RDF ontology files, combining:
 
 ```sh
 # from PyPI (once published)
-pipx install shifty-lsp
+uv tool install shifty-lsp
 
 # or straight from the repo
-pipx install git+https://github.com/gtfierro/shifty-lsp
-# or: uv tool install git+https://github.com/gtfierro/shifty-lsp
+uv tool install git+https://github.com/gtfierro/shifty-lsp
 ```
 
 **Neovim plugin** (Neovim ≥ 0.11, ships an `lsp/` config):
