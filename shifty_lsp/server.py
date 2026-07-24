@@ -80,15 +80,22 @@ class EnvironmentManager:
                 self.root = root
             return self.env
 
-    def refresh(self) -> None:
-        """Re-run discovery (e.g. after files were saved/added)."""
+    def refresh(self, invalidate: bool = False) -> None:
+        """Re-run discovery (e.g. after files were saved/added).
+
+        Does not invalidate the shapes cache by default: if a document's
+        owl:imports set is unchanged, re-resolving and re-merging the closure
+        is wasted work. Pass invalidate=True (the refreshEnvironment command)
+        to force rebuilding shapes graphs, e.g. after editing an ontology
+        that other files import."""
         with self.lock:
             if self.env is not None:
                 try:
                     self.env.update()
                 except Exception:
                     log.exception("ontoenv update failed")
-        _invalidate_shapes_cache()
+        if invalidate:
+            _invalidate_shapes_cache()
 
 
 ENV = EnvironmentManager()
@@ -710,10 +717,10 @@ CMD_VALIDATE_FILE = "shifty-lsp.validateFile"
 
 @server.command(CMD_REFRESH_ENVIRONMENT)
 def refresh_environment(*args) -> None:
-    """Re-scan the repository, re-registering all .ttl files and refreshing
-    the ontoenv environment; then revalidate all open documents."""
+    """Re-scan the repository, re-registering all .ttl files, invalidating
+    cached shapes graphs, and revalidating all open documents."""
     log.info("command: refreshEnvironment")
-    ENV.refresh()
+    ENV.refresh(invalidate=True)
     for uri in list(server.workspace.text_documents):
         _schedule_validation(uri)
 
