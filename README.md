@@ -54,6 +54,13 @@ imports closure in the ontoenv environment. Items carry the term's `rdfs:label` 
 and `rdfs:comment` as documentation. Completion works even while the buffer doesn't parse
 (imports are recovered with a regex), and the client filters as you keep typing.
 
+## Document symbols (outline)
+
+`textDocument/documentSymbol` returns the ontology declaration plus every typed subject
+in the file (classes, properties, SHACL shapes, individuals) with their `rdf:type` as
+detail. Use it via `gO` (built-in location list), `:Telescope lsp_document_symbols`, or
+outline plugins like aerial.nvim.
+
 ## Goto definition
 
 `textDocument/definition` is supported: with the cursor on an ontology IRI or prefixed

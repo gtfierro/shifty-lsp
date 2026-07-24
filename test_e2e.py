@@ -213,6 +213,16 @@ def main():
     print("OK: hover ->", hover_md.replace("\n", " "))
     assert "Person" in hover_md and "A human being." in hover_md
 
+    # textDocument/documentSymbol: outline of data.ttl
+    send(proc, {
+        "jsonrpc": "2.0", "id": 8, "method": "textDocument/documentSymbol",
+        "params": {"textDocument": {"uri": data_path.as_uri()}},
+    })
+    resp = reader.wait_for(lambda m: m.get("id") == 8)
+    names = {s["name"] for s in resp["result"]}
+    print("OK: document symbols:", sorted(names))
+    assert "ex:Alice" in names and "ex:Bob" in names
+
     # workspace/executeCommand: refreshEnvironment
     send(proc, {
         "jsonrpc": "2.0", "id": 2, "method": "workspace/executeCommand",

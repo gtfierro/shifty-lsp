@@ -441,6 +441,69 @@ def _document_prefixes(text: str) -> dict[str, str]:
     return dict(re.findall(r"(?:@prefix|PREFIX)\s+([\w-]+):\s*<([^>]+)>", text))
 
 
+_SYMBOL_KINDS = [
+    (OWL.Ontology, types.SymbolKind.Package),
+    (OWL.Class, types.SymbolKind.Class),
+    (RDFS.Class, types.SymbolKind.Class),
+    (OWL.ObjectProperty, types.SymbolKind.Property),
+    (OWL.DatatypeProperty, types.SymbolKind.Property),
+    (OWL.AnnotationProperty, types.SymbolKind.Property),
+    (RDF.Property, types.SymbolKind.Property),
+    (SH.NodeShape, types.SymbolKind.Interface),
+    (SH.PropertyShape, types.SymbolKind.Interface),
+]
+
+
+@server.feature(types.TEXT_DOCUMENT_DOCUMENT_SYMBOL)
+def document_symbol(
+    params: types.DocumentSymbolParams,
+) -> Optional[list[types.DocumentSymbol]]:
+    """Outline of the file: the ontology declaration plus every typed subject
+    (classes, properties, shapes, individuals), navigable via gO / outline
+    plugins / Telescope."""
+    try:
+        doc = server.workspace.get_text_document(params.text_document.uri)
+        text = doc.source
+        graph = rdflib.Graph()
+        graph.parse(data=text, format="turtle")
+    except Exception:
+        return None
+    prefixes = _document_prefixes(text)
+    lines = text.splitlines()
+
+    def qname(iri: str) -> str:
+        for p, base in prefixes.items():
+            if iri.startswith(base):
+                return f"{p}:{iri[len(base):]}"
+        return iri
+
+    symbols: list[types.DocumentSymbol] = []
+    for s in sorted(set(graph.subjects(RDF.type, None)), key=str):
+        if not isinstance(s, URIRef):
+            continue
+        types_ = list(graph.objects(s, RDF.type))
+        kind = types.SymbolKind.Variable
+        for t, k in _SYMBOL_KINDS:
+            if t in types_:
+                kind = k
+                break
+        line = min(_find_lines(text, s))
+        rng = types.Range(
+            start=types.Position(line=line, character=0),
+            end=types.Position(line=line, character=len(lines[line])),
+        )
+        symbols.append(
+            types.DocumentSymbol(
+                name=qname(str(s)),
+                detail=", ".join(qname(str(t)) for t in types_),
+                kind=kind,
+                range=rng,
+                selection_range=rng,
+            )
+        )
+    return symbols or None
+
+
 @server.feature(types.TEXT_DOCUMENT_HOVER)
 def hover(params: types.HoverParams) -> Optional[types.Hover]:
     """Show documentation for the term under the cursor: rdfs:label,
