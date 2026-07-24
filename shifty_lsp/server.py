@@ -138,16 +138,46 @@ def _progress_end(token: Optional[str], message: Optional[str] = None) -> None:
 _timers: dict[str, threading.Timer] = {}
 _timers_lock = threading.Lock()
 
+# uri -> monotonically increasing counter; bumped every time a validation is
+# scheduled. A running validation whose generation is stale (the user kept
+# typing) discards its diagnostics instead of publishing outdated results.
+_validation_gen: dict[str, int] = {}
+
 
 def _schedule_validation(uri: str) -> None:
     with _timers_lock:
         old = _timers.pop(uri, None)
         if old is not None:
             old.cancel()
-        timer = threading.Timer(DEBOUNCE_SECONDS, validate_document, args=(uri,))
+        gen = _validation_gen.get(uri, 0) + 1
+        _validation_gen[uri] = gen
+        timer = threading.Timer(DEBOUNCE_SECONDS, _run_validation, args=(uri,))
         timer.daemon = True
         _timers[uri] = timer
         timer.start()
+
+
+def _run_validation(uri: str) -> None:
+    # Pop ourselves out of the timer table first, so _is_stale() only sees
+    # *newer* scheduled runs.
+    with _timers_lock:
+        _timers.pop(uri, None)
+    validate_document(uri)
+
+
+def _cancel_pending(uri: str) -> None:
+    with _timers_lock:
+        old = _timers.pop(uri, None)
+        if old is not None:
+            old.cancel()
+
+
+def _is_stale(uri: str) -> bool:
+    """True if a newer validation was scheduled while this one was running.
+    Manual validations (validateFile command) bypass this check."""
+    with _timers_lock:
+        timer = _timers.get(uri)
+        return timer is not None and timer.is_alive()
 
 
 @server.feature(types.INITIALIZE)
@@ -571,6 +601,9 @@ def _validate_document(uri: str, progress_token: Optional[str]) -> bool:
         log.exception("validation failed for %s", uri)
         conforms = False
 
+    if _is_stale(uri):
+        log.info("discarding stale validation results for %s", path.name)
+        return conforms
     _publish(uri, diagnostics)
     # Any error-severity diagnostic (failed import, validation error, parse
     # error) means the document does not conform.
@@ -703,6 +736,7 @@ def validate_file(*args) -> bool:
         if not docs:
             return True
         uri = docs[0]
+    _cancel_pending(uri)  # don't let a queued debounced run override this one
     try:
         conforms = validate_document(uri)
     except Exception:

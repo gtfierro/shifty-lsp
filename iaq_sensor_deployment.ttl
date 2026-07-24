@@ -84,7 +84,7 @@
 
 :floor_1 a rec:Level ;
     rdfs:label "First Floor" ;
-    rec:levelNumber 1 ;
+    rec:levelNumber "1" ;
     rec:hasPart :kitchen,
         :bedroom,
         :living_room .
