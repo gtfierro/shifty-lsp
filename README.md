@@ -123,8 +123,21 @@ vim.api.nvim_create_autocmd("FileType", {
 ```
 
 Progress during validation (import downloads, shifty runs) is reported via
-`window/workDoneProgress` — install [fidget.nvim](https://github.com/j-hui/fidget.nvim)
-to see it as a status widget.
+`window/workDoneProgress`. Stock Neovim does **not** display this anywhere visible —
+either install [fidget.nvim](https://github.com/j-hui/fidget.nvim) (`opts = {}` is
+enough), or add this autocmd to echo progress to the message area:
+
+```lua
+vim.api.nvim_create_autocmd("LspProgress", {
+  callback = function(ev)
+    local value = ev.data.params.value
+    if value.kind == "end" then return end
+    local msg = value.title or ""
+    if value.message then msg = msg .. ": " .. value.message end
+    vim.api.nvim_echo({ { msg, "Comment" } }, false, {})
+  end,
+})
+```
 
 ### VS Code
 
