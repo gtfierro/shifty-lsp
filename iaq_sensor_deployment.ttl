@@ -38,7 +38,6 @@
 @prefix ref: <https://brickschema.org/schema/Brick/ref#> .
 @prefix unit: <http://qudt.org/vocab/unit/> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
-@prefix qudt: <http://qudt.org/schema/qudt/> .
 
 ####################################################################################
 # 1. Ontology header
@@ -58,8 +57,6 @@
 # rates. The outdoor space hosts the reference station: indoor concentrations
 # only mean something relative to the outdoor background.
 ####################################################################################
-
-unit:DEG_F a qudt:Unit .
 
 :site_1 a rec:Site ;
     rdfs:label "123 Alder Street parcel" ;

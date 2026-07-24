@@ -10,6 +10,22 @@ A language server for Turtle/RDF ontology files, combining:
   shapes graph). `sh:Violation`, `sh:Warning`, and `sh:Info` results are published as LSP
   error/warning/information diagnostics.
 
+## Features
+
+| Feature | LSP method |
+|---|---|
+| Continuous SHACL validation + inference, results as diagnostics | `textDocument/publishDiagnostics` |
+| Turtle syntax errors as diagnostics (correct line) | 〃 |
+| Unresolvable `owl:imports` (404 etc.) as error diagnostics | 〃 |
+| Prefix-aware completion from the ontology environment (`brick:IAQ…`) | `textDocument/completion` |
+| Hover docs (`rdfs:label`/`comment`/types/supertypes) | `textDocument/hover` |
+| Goto definition of ontology IRIs (remote ontologies materialized locally) | `textDocument/definition` |
+| References, repo-wide | `textDocument/references` |
+| Document outline (ontology, classes, shapes, individuals) | `textDocument/documentSymbol` |
+| Quickfix: declare missing prefix (+ `owl:imports`) | `textDocument/codeAction` |
+| Progress reporting during downloads/validation | `window/workDoneProgress` |
+| Validation summary messages | `window/showMessage` |
+
 ## Install
 
 ```sh
@@ -24,24 +40,34 @@ This provides the `shifty-lsp` executable (stdio transport).
    workspace (walks up looking for `.git`; falls back to the workspace folder) and
    opens/creates an ontoenv environment there (`.ontoenv/` directory). Opening any file
    automatically loads the environment and triggers validation — no manual setup needed.
-2. On document open/change (debounced ~0.8s) and save:
+2. On document open/change (debounced ~0.8s, in a background thread) and save:
    - The document is parsed with rdflib (parse errors become diagnostics, positioned at
      the line reported by the parser).
    - The file is registered with ontoenv, which downloads any missing `owl:imports`.
      Imports that cannot be fetched (404, network error, etc.) are published as **error
      diagnostics** on the `owl:imports` line, with the underlying error message.
-   - The transitive import closure is materialized as the shapes graph.
+   - The transitive import closure is materialized as the shapes graph. It is **cached
+     per document** and only rebuilt when the file's `owl:imports` set changes or the
+     `refreshEnvironment` command runs.
    - `shifty.validate(data, shapes, infer=True)` runs SHACL-AF rules to a fixed point and
-     validates; results are mapped to diagnostics, positioned at the line where the focus
-     node IRI (or its local name) first appears in the file.
-3. On save, ontoenv re-scans the repo so newly added `.ttl` files join the environment.
+     validates. Each result is mapped to diagnostics at **every line where the offending
+     node appears**: the `sh:value` node when the report identifies one, otherwise the
+     `sh:focusNode`. Matching is prefix-aware (`ex:Foo`, `<full-iri>`, local name) with
+     token boundaries.
+   - If you keep typing while a slow validation is in flight, the stale run's results
+     are discarded rather than overwriting fresher state.
+   - When validation completes, a `window/showMessage` summary is sent
+     (`shifty: file.ttl: conforms ✓` / `N error(s), M warning(s)`).
+3. On save, ontoenv re-scans the repo so newly added `.ttl` files join the environment
+   (this does not force shapes-graph rebuilds — see `refreshEnvironment` for that).
 
 ## Commands
 
 Executable via `workspace/executeCommand` from your editor:
 
-- `shifty-lsp.refreshEnvironment` — re-scan the repository and rebuild the ontoenv
-  environment, then revalidate all open documents.
+- `shifty-lsp.refreshEnvironment` — re-scan the repository, invalidate cached shapes
+  graphs, and revalidate all open documents. Use this after editing an ontology that
+  *other* files import (the per-document import-set cache can't detect that case).
 - `shifty-lsp.validateFile` — validate a single file (pass the document URI as the first
   argument; defaults to the current document) and publish diagnostics. Returns `true` if
   the file conforms, `false` otherwise.
@@ -53,6 +79,25 @@ offers every class, property, and individual in that namespace, drawn from the m
 imports closure in the ontoenv environment. Items carry the term's `rdfs:label` as detail
 and `rdfs:comment` as documentation. Completion works even while the buffer doesn't parse
 (imports are recovered with a regex), and the client filters as you keep typing.
+
+## Hover
+
+`textDocument/hover`: cursor on any IRI or prefixed name shows a markdown card with the
+term's `rdfs:label`, `rdf:type`, `rdfs:subClassOf` chain, and `rdfs:comment`, pulled from
+the merged ontology environment.
+
+## References
+
+`textDocument/references`: finds every occurrence of the term under the cursor, both in
+the current file and in all other `.ttl` files in the repository (`.ontoenv/` excluded).
+
+## Code actions (quickfix)
+
+`textDocument/codeAction`: when a prefixed name is used whose prefix is not declared in
+the file but **is** a known namespace in the ontology environment, offers a quickfix that
+inserts the `@prefix` declaration — plus an `owl:imports` statement when the prefix maps
+to a known ontology. Works even while the buffer doesn't parse (that's usually why the
+prefix is missing).
 
 ## Document symbols (outline)
 
