@@ -328,22 +328,33 @@ def _build_shapes_graph(
     return shapes, failed
 
 
-def _find_line(text: str, node: rdflib.term.Node) -> int:
-    """Best-effort: find the line where an IRI (or its final fragment) appears."""
+def _find_lines(text: str, node: rdflib.term.Node) -> set[int]:
+    """Best-effort: find every line where an IRI (or its prefixed/local form)
+    appears in the document."""
     if not isinstance(node, URIRef):
-        return 0
+        return {0}
     iri = str(node)
-    candidates = [f"<{iri}>", iri]
-    # also try the local name (after # or last /)
     local = iri.rsplit("#", 1)[-1].rsplit("/", 1)[-1]
+    # candidate substrings, most specific first: full IRI in angle brackets,
+    # prefixed form (ns:local for each declared prefix), bare local name
+    candidates = [f"<{iri}>"]
+    for prefix, base in _document_prefixes(text).items():
+        if iri.startswith(base):
+            candidates.append(f"{prefix}:{iri[len(base):]}")
     if local:
         candidates.append(local)
     lines = text.splitlines()
+    # use the first candidate form that matches anywhere, then report all of
+    # its occurrences
     for candidate in candidates:
-        for i, line in enumerate(lines):
-            if candidate in line:
-                return i
-    return 0
+        hits = {i for i, line in enumerate(lines) if candidate in line}
+        if hits:
+            return hits
+    return {0}
+
+
+def _find_line(text: str, node: rdflib.term.Node) -> int:
+    return min(_find_lines(text, node))
 
 
 # uri -> most recent shapes graph used for validation (drives completion)
@@ -497,13 +508,11 @@ def _report_to_diagnostics(
         path = report_graph.value(result, SH.resultPath)
         if path is not None:
             message += f" (path: {path})"
-        # Report on both the focus node and the value node (if distinct and
-        # locatable in the document).
-        focus_line = _find_line(text, focus) if focus is not None else 0
-        lines = {focus_line}
+        # Report on both the focus node and the value node, at every line
+        # where each appears in the document.
+        lines = _find_lines(text, focus) if focus is not None else {0}
         if value is not None:
-            value_line = _find_line(text, value)
-            lines.add(value_line)
+            lines |= _find_lines(text, value)
         for line in sorted(lines):
             rng = types.Range(
                 start=types.Position(line=line, character=0),

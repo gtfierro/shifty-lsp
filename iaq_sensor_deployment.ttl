@@ -83,8 +83,8 @@
     rec:netArea "148.0"^^xsd:float .
 
 :floor_1 a rec:Level ;
-    rdfs:label First Floor ;
-    rec:levelNumber "1" ;
+    rdfs:label "First Floor" ;
+    rec:levelNumber 1 ;
     rec:hasPart :kitchen,
         :bedroom,
         :living_room .
