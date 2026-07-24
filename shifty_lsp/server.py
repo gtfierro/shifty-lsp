@@ -345,9 +345,14 @@ def _find_lines(text: str, node: rdflib.term.Node) -> set[int]:
         candidates.append(local)
     lines = text.splitlines()
     # use the first candidate form that matches anywhere, then report all of
-    # its occurrences
+    # its occurrences; match on token boundaries so `ex:Person` doesn't hit
+    # `ex:PersonShape`
     for candidate in candidates:
-        hits = {i for i, line in enumerate(lines) if candidate in line}
+        if candidate.startswith("<"):
+            hits = {i for i, line in enumerate(lines) if candidate in line}
+        else:
+            pat = re.compile(r"(?<![\w.:-])" + re.escape(candidate) + r"(?![\w.-])")
+            hits = {i for i, line in enumerate(lines) if pat.search(line)}
         if hits:
             return hits
     return {0}
@@ -452,6 +457,144 @@ _SYMBOL_KINDS = [
     (SH.NodeShape, types.SymbolKind.Interface),
     (SH.PropertyShape, types.SymbolKind.Interface),
 ]
+
+
+def _line_range(text: str, line: int) -> types.Range:
+    lines = text.splitlines()
+    end = len(lines[line]) if line < len(lines) else 0
+    return types.Range(
+        start=types.Position(line=line, character=0),
+        end=types.Position(line=line, character=end),
+    )
+
+
+@server.feature(types.TEXT_DOCUMENT_REFERENCES)
+def references(params: types.ReferenceParams) -> Optional[list[types.Location]]:
+    """Find every occurrence of the term under the cursor: in this file and
+    in every other .ttl file in the repository."""
+    try:
+        doc = server.workspace.get_text_document(params.text_document.uri)
+        iri = _iri_at_position(doc.source, params.position.line, params.position.character)
+        if not iri:
+            return None
+        node = URIRef(iri)
+        locations: list[types.Location] = []
+        for line in sorted(_find_lines(doc.source, node)):
+            locations.append(
+                types.Location(uri=params.text_document.uri, range=_line_range(doc.source, line))
+            )
+        root = ENV.root or find_repo_root(_uri_to_path(params.text_document.uri).parent)
+        self_path = os.path.realpath(_uri_to_path(params.text_document.uri))
+        for ttl in sorted(root.rglob("*.ttl")):
+            if ".ontoenv" in ttl.parts or os.path.realpath(ttl) == self_path:
+                continue
+            try:
+                text = ttl.read_text()
+            except Exception:
+                continue
+            if iri not in text and str(node).rsplit("#", 1)[-1].rsplit("/", 1)[-1] not in text:
+                continue
+            for line in sorted(_find_lines(text, node)):
+                locations.append(types.Location(uri=ttl.as_uri(), range=_line_range(text, line)))
+        return locations or None
+    except Exception:
+        log.exception("references failed")
+        return None
+
+
+@server.feature(
+    types.TEXT_DOCUMENT_CODE_ACTION,
+    types.CodeActionOptions(code_action_kinds=[types.CodeActionKind.QuickFix]),
+)
+def code_action(params: types.CodeActionParams) -> Optional[list[types.CodeAction]]:
+    """Quickfix: a prefixed name is used whose prefix is not declared, but is
+    a known namespace in the ontology environment -> offer to add the @prefix
+    declaration and an owl:imports statement for the matching ontology."""
+    try:
+        doc = server.workspace.get_text_document(params.text_document.uri)
+        text = doc.source
+        declared = _document_prefixes(text)
+        used = set(re.findall(r"\b([A-Za-z_][\w-]*):[\w.-]+", text))
+        undeclared = used - set(declared) - {"http", "https"}
+        if not undeclared:
+            return None
+
+        # namespaces known to the ontology environment (all discovered
+        # ontologies + the merged shapes graph)
+        env0 = ENV.ensure(find_repo_root(_uri_to_path(params.text_document.uri).parent))
+        known: dict[str, str] = {}
+        with ENV.lock:
+            try:
+                known.update({p: str(ns) for p, ns in env0.get_namespaces().items()})
+            except Exception:
+                pass
+        graph = _last_shapes.get(params.text_document.uri)
+        if graph is not None:
+            known.update({p: str(ns) for p, ns in graph.namespaces()})
+        if not known:
+            return None
+
+        # find an ontology in the env that declares each missing prefix
+        import_for: dict[str, str] = {}
+        env = ENV.env
+        if env is not None:
+            with ENV.lock:
+                for name in env.get_ontology_names():
+                    try:
+                        ont = env.get_ontology(name)
+                        nm = ont.namespace_map or {}
+                    except Exception:
+                        continue
+                    for p in undeclared:
+                        if p in nm and p not in import_for:
+                            import_for[p] = ont.location or name
+
+        # insertion point: after the last @prefix line
+        lines = text.splitlines()
+        insert_line = 0
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith(("@prefix", "PREFIX")):
+                insert_line = i + 1
+
+        doc_ont = re.search(r"<([^>]+)>\s+a\s+owl:Ontology", text)
+        actions: list[types.CodeAction] = []
+        for p in sorted(undeclared):
+            ns = known.get(p)
+            if ns is None:
+                continue
+            edits = [
+                types.TextEdit(
+                    range=types.Range(
+                        start=types.Position(line=insert_line, character=0),
+                        end=types.Position(line=insert_line, character=0),
+                    ),
+                    new_text=f"@prefix {p}: <{ns}> .\n",
+                )
+            ]
+            imp = import_for.get(p)
+            title = f"Declare prefix '{p}:'"
+            if imp and doc_ont:
+                edits.append(
+                    types.TextEdit(
+                        range=types.Range(
+                            start=types.Position(line=len(lines), character=0),
+                            end=types.Position(line=len(lines), character=0),
+                        ),
+                        new_text=f"\n<{doc_ont.group(1)}> owl:imports <{imp}> .\n",
+                    )
+                )
+                title += f" and import {imp}"
+            actions.append(
+                types.CodeAction(
+                    title=title,
+                    kind=types.CodeActionKind.QuickFix,
+                    edit=types.WorkspaceEdit(changes={params.text_document.uri: edits}),
+                )
+            )
+        return actions or None
+    except Exception:
+        log.exception("code action failed")
+        return None
 
 
 @server.feature(types.TEXT_DOCUMENT_DOCUMENT_SYMBOL)

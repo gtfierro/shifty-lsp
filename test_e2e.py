@@ -223,6 +223,49 @@ def main():
     print("OK: document symbols:", sorted(names))
     assert "ex:Alice" in names and "ex:Bob" in names
 
+    # textDocument/references on ex:Person (used in data.ttl twice + shapes.ttl once)
+    send(proc, {
+        "jsonrpc": "2.0", "id": 9, "method": "textDocument/references",
+        "params": {
+            "textDocument": {"uri": data_path.as_uri()},
+            "position": {"line": person_line, "character": DATA_TTL.splitlines()[person_line].index("ex:Person") + 3},
+            "context": {"includeDeclaration": True},
+        },
+    })
+    resp = reader.wait_for(lambda m: m.get("id") == 9)
+    ref_lines = [(r["uri"].rsplit("/", 1)[-1], r["range"]["start"]["line"]) for r in resp["result"]]
+    print("OK: references:", ref_lines)
+    assert any(u == "shapes.ttl" for u, _ in ref_lines), "expected a repo-wide reference in shapes.ttl"
+
+    # textDocument/codeAction: undeclared 'sh' prefix -> quickfix offers declaration
+    ca_path = tmp / "ca.ttl"
+    ca_text = (
+        "@prefix ex: <http://example.org/> .\n"
+        "@prefix owl: <http://www.w3.org/2002/07/owl#> .\n"
+        "<http://example.org/ca> a owl:Ontology ;\n"
+        "    owl:imports <http://example.org/shapes> .\n"
+        "ex:thing a ex:Person ; sh:node ex:PersonShape .\n"
+    )
+    ca_path.write_text(ca_text)
+    send(proc, {
+        "jsonrpc": "2.0", "method": "textDocument/didOpen",
+        "params": {"textDocument": {"uri": ca_path.as_uri(), "languageId": "turtle",
+                                    "version": 1, "text": ca_text}},
+    })
+    time.sleep(3)
+    send(proc, {
+        "jsonrpc": "2.0", "id": 10, "method": "textDocument/codeAction",
+        "params": {
+            "textDocument": {"uri": ca_path.as_uri()},
+            "range": {"start": {"line": 0, "character": 0}, "end": {"line": 4, "character": 0}},
+            "context": {"diagnostics": []},
+        },
+    })
+    resp = reader.wait_for(lambda m: m.get("id") == 10)
+    titles = [a["title"] for a in (resp["result"] or [])]
+    print("OK: code actions:", titles)
+    assert any("sh:" in t for t in titles), "expected a quickfix for undeclared 'sh' prefix"
+
     # workspace/executeCommand: refreshEnvironment
     send(proc, {
         "jsonrpc": "2.0", "id": 2, "method": "workspace/executeCommand",
