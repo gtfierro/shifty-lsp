@@ -110,6 +110,12 @@ vim.api.nvim_create_autocmd("FileType", {
     -- hover: label/comment/types for the term under the cursor
     vim.keymap.set("n", "K", vim.lsp.buf.hover, { buffer = args.buf, desc = "hover docs" })
 
+    -- references: every use of the term (this file + repo .ttl files)
+    vim.keymap.set("n", "gr", vim.lsp.buf.references, { buffer = args.buf, desc = "references" })
+
+    -- code actions: e.g. "Declare prefix 'sh:' and import ..." quickfix
+    vim.keymap.set("n", "<leader>ca", vim.lsp.buf.code_action, { buffer = args.buf, desc = "code action" })
+
     -- jump between diagnostics from the cursor position (float shows the message)
     vim.keymap.set("n", "]e", function()
       vim.diagnostic.jump({ count = 1, float = true })
