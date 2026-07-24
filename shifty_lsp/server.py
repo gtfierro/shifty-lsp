@@ -154,17 +154,18 @@ def on_initialize(params: types.InitializeParams) -> None:
     global _client_work_done_progress
     if params.capabilities.window and params.capabilities.window.work_done_progress:
         _client_work_done_progress = True
+    # NOTE: deliberately do NOT open the ontoenv environment here — it can
+    # take seconds (first-time store creation, lock contention) and would
+    # block the initialize response, during which the client rejects all
+    # requests as "method not supported". The env is created lazily on first
+    # use (did_open / validate / commands).
     root: Optional[Path] = None
     if params.workspace_folders:
         root = _uri_to_path(params.workspace_folders[0].uri)
     elif params.root_uri:
         root = _uri_to_path(params.root_uri)
     if root is not None:
-        root = find_repo_root(root)
-        try:
-            ENV.ensure(root)
-        except Exception:
-            log.exception("failed to initialize ontoenv at %s", root)
+        ENV.root = find_repo_root(root)  # cheap; just records the root
 
 
 @server.feature(types.TEXT_DOCUMENT_DID_OPEN)
