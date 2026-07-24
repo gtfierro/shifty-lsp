@@ -100,15 +100,23 @@ vim.api.nvim_create_autocmd("FileType", {
     -- goto definition (jump to an ontology's .ttl from its IRI in owl:imports)
     vim.keymap.set("n", "gd", vim.lsp.buf.definition, { buffer = args.buf, desc = "goto definition" })
 
-    -- validate the current file, showing the conforms result
+    -- validate the current file, showing the conforms result.
+    -- NOTE: async request -- a synchronous buf_request_sync would block the
+    -- UI and swallow the server's progress notifications.
     vim.api.nvim_buf_create_user_command(args.buf, "ShiftyValidate", function()
-      local res = vim.lsp.buf_request_sync(0, "workspace/executeCommand", {
+      local client = vim.lsp.get_clients({ bufnr = 0, name = "shifty-lsp" })[1]
+      if not client then return end
+      client:request("workspace/executeCommand", {
         command = "shifty-lsp.validateFile",
         arguments = { vim.uri_from_bufnr(0) },
-      }, 60000)
-      local conforms = res and next(res) and vim.iter(vim.tbl_values(res)):all(function(r) return r.result end)
-      vim.notify(conforms and "\226\156\147 conforms" or "\226\156\151 violations found",
-        conforms and vim.log.levels.INFO or vim.log.levels.ERROR)
+      }, function(err, result)
+        if err then
+          vim.notify("shifty-lsp error: " .. tostring(err.message), vim.log.levels.ERROR)
+          return
+        end
+        vim.notify(result and "\226\156\147 conforms" or "\226\156\151 violations found",
+          result and vim.log.levels.INFO or vim.log.levels.ERROR)
+      end, 0)
     end, {})
 
     -- refresh the ontoenv environment
