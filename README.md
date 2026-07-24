@@ -100,6 +100,21 @@ vim.api.nvim_create_autocmd("FileType", {
     -- goto definition (jump to an ontology's .ttl from its IRI in owl:imports)
     vim.keymap.set("n", "gd", vim.lsp.buf.definition, { buffer = args.buf, desc = "goto definition" })
 
+    -- jump between diagnostics from the cursor position (float shows the message)
+    vim.keymap.set("n", "]e", function()
+      vim.diagnostic.jump({ count = 1, float = true })
+    end, { buffer = args.buf, desc = "next diagnostic" })
+    vim.keymap.set("n", "[e", function()
+      vim.diagnostic.jump({ count = -1, float = true })
+    end, { buffer = args.buf, desc = "prev diagnostic" })
+    -- errors only (skip warnings/infos):
+    vim.keymap.set("n", "]E", function()
+      vim.diagnostic.jump({ count = 1, float = true, severity = vim.diagnostic.severity.ERROR })
+    end, { buffer = args.buf, desc = "next error" })
+    vim.keymap.set("n", "[E", function()
+      vim.diagnostic.jump({ count = -1, float = true, severity = vim.diagnostic.severity.ERROR })
+    end, { buffer = args.buf, desc = "prev error" })
+
     -- validate the current file, showing the conforms result.
     -- NOTE: async request -- a synchronous buf_request_sync would block the
     -- UI and swallow the server's progress notifications.
