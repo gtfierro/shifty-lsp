@@ -28,7 +28,7 @@ import rdflib
 from rdflib import RDF, OWL, URIRef
 
 import shifty
-from ontoenv import OntoEnv
+from ontoenv import CatalogRecoveryError, OntoEnv, UnresolvedImportError
 
 from shifty_lsp import __version__
 
@@ -70,32 +70,69 @@ class EnvironmentManager:
         with self.lock:
             if self.env is None or self.root != root:
                 log.info("initializing ontoenv at %s", root)
-                self.env = OntoEnv(
-                    path=str(root),
-                    search_directories=[str(root)],
-                    includes=["*.ttl"],
-                    strict=False,
-                    create_or_use_cached=True,
-                )
+                if self.env is not None:
+                    # release the previous environment's store/lock before
+                    # opening another one
+                    self._close_locked()
+                self.env = self._connect(root)
                 self.root = root
+                # connect() reopens an existing environment as-is; it does not
+                # rescan configured sources. Discovery happens here.
+                try:
+                    self.env.update()
+                except Exception:
+                    log.exception("initial ontoenv update failed")
             return self.env
 
-    def refresh(self, invalidate: bool = False) -> None:
+    @staticmethod
+    def _connect(root: Path) -> OntoEnv:
+        options = dict(
+            search_directories=[str(root)],
+            includes=["*.ttl"],
+            strict=False,
+        )
+        try:
+            return OntoEnv.connect(str(root), **options)
+        except CatalogRecoveryError:
+            # A previous server process was killed mid-mutation (editors do
+            # SIGKILL the language server) and left a recovery marker.
+            log.warning("ontoenv catalog needs recovery at %s; rebuilding", root)
+            return OntoEnv.recover(str(root), **options)
+
+    def refresh(self, invalidate: bool = False, force: bool = False) -> None:
         """Re-run discovery (e.g. after files were saved/added).
 
         Does not invalidate the shapes cache by default: if a document's
         owl:imports set is unchanged, re-resolving and re-merging the closure
         is wasted work. Pass invalidate=True (the refreshEnvironment command)
         to force rebuilding shapes graphs, e.g. after editing an ontology
-        that other files import."""
+        that other files import. force=True additionally makes ontoenv bypass
+        its timestamp/cache-age checks when rescanning sources."""
         with self.lock:
             if self.env is not None:
                 try:
-                    self.env.update()
+                    self.env.update(force=force)
                 except Exception:
                     log.exception("ontoenv update failed")
         if invalidate:
             _invalidate_shapes_cache()
+
+    def _close_locked(self) -> None:
+        env, self.env = self.env, None
+        if env is None:
+            return
+        try:
+            env.close()
+        except Exception:
+            log.exception("closing ontoenv failed")
+
+    def close(self) -> None:
+        """Release the environment (flushing pending writes) so the next
+        process doesn't have to recover the catalog."""
+        with self.lock:
+            if self.env is not None:
+                self._close_locked()
+            self.root = None
 
 
 ENV = EnvironmentManager()
@@ -206,6 +243,14 @@ def on_initialize(params: types.InitializeParams) -> None:
         ENV.root = find_repo_root(root)  # cheap; just records the root
 
 
+@server.feature(types.SHUTDOWN)
+def on_shutdown(*args) -> None:
+    # Close the environment explicitly: this flushes pending writes and drops
+    # the store lock, so the next server process can connect() without having
+    # to recover the catalog.
+    ENV.close()
+
+
 @server.feature(types.TEXT_DOCUMENT_DID_OPEN)
 def did_open(params: types.DidOpenTextDocumentParams) -> None:
     # Automatically load the ontoenv environment for the file's repository
@@ -265,11 +310,15 @@ def _check_imports(
     failed: list[tuple[str, str]] = []
     for imp in imports:
         try:
+            # read-only, store-backed view: cheap presence check, no copy
             env.get_graph(imp)
             resolved.append(imp)
             continue
-        except Exception:
+        except (ValueError, UnresolvedImportError):
+            # not in the environment, or a known-unresolved import target
             pass
+        except Exception:
+            log.exception("unexpected error looking up import %s", imp)
         # Not cached: try to download it and capture the failure reason
         try:
             env.add(imp, fetch_imports=True)
@@ -293,11 +342,14 @@ def _build_shapes_graph(
     imports = _imports_of(data_graph)
 
     # Register the document itself so its imports are processed by ontoenv,
-    # downloading anything not already cached.
+    # downloading anything not already cached. update(location) replaces the
+    # stored graph for an already-known file; a plain add() would instead
+    # no-op *and* mark the source as fresh, so later update() calls would skip
+    # the file we are actively editing.
     try:
-        env.add(str(doc_path), fetch_imports=True)
+        env.update(str(doc_path))
     except Exception:
-        log.exception("ontoenv add failed for %s", doc_path)
+        log.exception("ontoenv update failed for %s", doc_path)
 
     # Explicitly verify each declared import resolved; collect failures so
     # they can be surfaced to the user as diagnostics.
@@ -306,23 +358,23 @@ def _build_shapes_graph(
     ont_iri = _ontology_iri(data_graph)
     if ont_iri:
         try:
-            closure, _n = env.get_closure(ont_iri)
+            # copy_closure (not get_closure) because the result is mutated
+            # below and cached for reuse; get_closure returns a read-only view
+            # tied to the environment snapshot.
+            closure, _n = env.copy_closure(ont_iri)
             # closure includes the doc's own triples; exclude them so the
             # schema comes only from imported ontologies
-            for t in closure:
-                if t not in data_graph:
-                    shapes.add(t)
-            if len(shapes) > 0:
-                return shapes, failed
+            for t in data_graph:
+                closure.remove(t)
+            if len(closure) > 0:
+                return closure, failed
         except Exception:
-            log.exception("get_closure failed for %s", ont_iri)
+            log.exception("copy_closure failed for %s", ont_iri)
 
-    # Fallback: fetch each resolved import's closure individually
+    # Fallback: merge each resolved import's closure individually
     for imp in resolved:
         try:
-            g, _n = env.get_closure(imp)
-            for t in g:
-                shapes.add(t)
+            env.copy_closure(imp, graph=shapes)
         except Exception:
             log.warning("could not build closure for import %s", imp)
     return shapes, failed
@@ -739,9 +791,7 @@ def completion(params: types.CompletionParams) -> Optional[types.CompletionList]
                 except Exception:
                     for imp in re.findall(r"owl:imports\s+<([^>]+)>", doc.source):
                         try:
-                            g, _n = env.get_closure(imp)
-                            for t in g:
-                                graph.add(t)
+                            env.copy_closure(imp, graph=graph)
                         except Exception:
                             log.warning("completion: could not load import %s", imp)
             _last_shapes[params.text_document.uri] = graph
@@ -938,7 +988,9 @@ def _materialize_remote(env: OntoEnv, name: str, location: str) -> Optional[str]
     out = cache_dir / safe
     if not out.exists():
         try:
-            g = env.get_graph(name)
+            # copy_graph, not get_graph: this writes a detached snapshot to
+            # disk, so take a real graph rather than a store-backed view
+            g = env.copy_graph(name)
             g.serialize(destination=str(out), format="turtle")
             log.info("materialized %s -> %s", name, out)
         except Exception:
@@ -1006,7 +1058,7 @@ def refresh_environment(*args) -> None:
     """Re-scan the repository, re-registering all .ttl files, invalidating
     cached shapes graphs, and revalidating all open documents."""
     log.info("command: refreshEnvironment")
-    ENV.refresh(invalidate=True)
+    ENV.refresh(invalidate=True, force=True)
     for uri in list(server.workspace.text_documents):
         _schedule_validation(uri)
 

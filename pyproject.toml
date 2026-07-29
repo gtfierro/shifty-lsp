@@ -2,10 +2,10 @@
 name = "shifty-lsp"
 version = "0.1.0"
 description = "Language server for Turtle/RDF ontologies: ontoenv-powered owl:imports resolution and continuous SHACL validation via shifty"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "pygls>=2.0",
-    "ontoenv>=0.5",
+    "ontoenv>=0.6,<0.7",
     "pyshifty>=0.2",
     "rdflib>=7.0",
 ]
