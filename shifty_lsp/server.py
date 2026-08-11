@@ -12,13 +12,18 @@ Features:
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import re
+import signal
 import threading
+import time
 import uuid
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import unquote, urlparse
 
 from lsprotocol import types
@@ -44,6 +49,17 @@ SEVERITY_MAP = {
 
 DEBOUNCE_SECONDS = 0.8
 
+WRITER_THREAD_PREFIX = "ontoenv-writer"
+
+# How long the environment may sit unused before the server closes it and hands
+# the store lock back to other processes. Set SHIFTY_LSP_IDLE_RELEASE=0 to keep
+# the environment open for the lifetime of the server instead.
+ENV_IDLE_SECONDS = float(os.environ.get("SHIFTY_LSP_IDLE_RELEASE", "5"))
+
+# Another process may hold the store lock; back off and try again (linearly).
+BUSY_RETRY_SECONDS = 2.0
+BUSY_RETRIES = 5
+
 
 def _uri_to_path(uri: str) -> Path:
     return Path(unquote(urlparse(uri).path))
@@ -58,30 +74,126 @@ def find_repo_root(start: Path) -> Path:
     return start
 
 
-class EnvironmentManager:
-    """Owns the OntoEnv for the workspace / git repository root."""
+class _Writer:
+    """Serializes every ontoenv mutation onto a single background thread.
+
+    Mutations anywhere else go wrong in two ways:
+
+      * pygls runs handlers inline on its event loop, so an update() or a
+        download started from a request blocks every other message — including
+        `shutdown` — for as long as it takes, which is what gets the server
+        killed by the editor while it is writing.
+      * A mutation that is abandoned part-way leaves ontoenv's
+        `catalog.pending` marker behind; the next connect() then raises
+        CatalogRecoveryError and has to rebuild the whole catalog.
+
+    A single non-daemon worker means writes never overlap, and a write that
+    has started always runs to completion: stop() cancels only jobs that have
+    not begun, and ThreadPoolExecutor joins its worker at interpreter exit.
+    """
 
     def __init__(self) -> None:
-        self.lock = threading.Lock()
+        self._pool = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix=WRITER_THREAD_PREFIX
+        )
+        self._lock = threading.Lock()
+        self._stopped = False
+
+    def submit(self, fn: Callable, *args, **kwargs) -> Optional[Future]:
+        """Queue a mutation. Returns None once the writer has been stopped."""
+        with self._lock:
+            if self._stopped:
+                log.debug("writer stopped; dropping %s", getattr(fn, "__name__", fn))
+                return None
+            future = self._pool.submit(fn, *args, **kwargs)
+        # Once the queue drains, start counting down to releasing the store
+        # lock. The callback runs on the writer thread as each job finishes, so
+        # the timer is re-armed by every subsequent job.
+        future.add_done_callback(lambda _f: _arm_idle_release())
+        return future
+
+    def stop(self) -> None:
+        with self._lock:
+            if self._stopped:
+                return
+            self._stopped = True
+        # cancel_futures drops what has not started; wait=True lets the job
+        # that is currently mutating the environment finish cleanly.
+        self._pool.shutdown(wait=True, cancel_futures=True)
+
+
+_writer = _Writer()
+
+
+def _on_writer_thread() -> bool:
+    return threading.current_thread().name.startswith(WRITER_THREAD_PREFIX)
+
+
+class EnvironmentBusy(Exception):
+    """Another process holds the store lock on `.ontoenv/`."""
+
+
+class EnvironmentManager:
+    """Owns the OntoEnv for the workspace / git repository root.
+
+    The environment is held only while it is being used. An open writable
+    connection takes an exclusive lock on the store: while the server holds it,
+    another process's writable connect() fails outright and a *read-only*
+    connect() blocks indefinitely. That makes running scripts against the same
+    `.ontoenv/` impossible while a file is open in the editor, so the server
+    releases the environment once it has been idle (see `_arm_idle_release`).
+    Reopening costs milliseconds — it is only the initial source scan that is
+    expensive, and that is not repeated.
+
+    Anything that opens or mutates the environment (ensure, refresh, release,
+    close) belongs on the writer thread. Readers use borrow(), which holds the
+    lock so the environment can't be released underneath them."""
+
+    def __init__(self) -> None:
+        self.lock = threading.RLock()
         self.env: Optional[OntoEnv] = None
         self.root: Optional[Path] = None
+        self.stopped = False
+        # roots whose sources have been scanned in this process; a reopen must
+        # not repeat the scan
+        self.scanned: set[Path] = set()
+
+    def peek(self) -> Optional[OntoEnv]:
+        """The environment if one is already open; never opens one."""
+        return self.env
+
+    @contextmanager
+    def borrow(self):
+        """Yield the environment for read-only use, or None if it is closed.
+
+        Holds the lock for the duration, so an idle release can't close the
+        environment while it is being read."""
+        with self.lock:
+            yield self.env
 
     def ensure(self, root: Path) -> OntoEnv:
         with self.lock:
+            if self.stopped:
+                raise RuntimeError("ontoenv environment is shutting down")
             if self.env is None or self.root != root:
-                log.info("initializing ontoenv at %s", root)
                 if self.env is not None:
                     # release the previous environment's store/lock before
                     # opening another one
                     self._close_locked()
                 self.env = self._connect(root)
                 self.root = root
-                # connect() reopens an existing environment as-is; it does not
-                # rescan configured sources. Discovery happens here.
-                try:
-                    self.env.update()
-                except Exception:
-                    log.exception("initial ontoenv update failed")
+                if root not in self.scanned:
+                    log.info("scanning ontology sources at %s", root)
+                    # connect() reopens an existing environment as-is; it does
+                    # not rescan configured sources. Discovery happens here,
+                    # once per root — reopening after an idle release must not
+                    # pay for it again.
+                    try:
+                        self.env.update()
+                    except Exception:
+                        log.exception("initial ontoenv update failed")
+                    self.scanned.add(root)
+                    _namespace_index_invalidate()
             return self.env
 
     @staticmethod
@@ -98,6 +210,21 @@ class EnvironmentManager:
             # SIGKILL the language server) and left a recovery marker.
             log.warning("ontoenv catalog needs recovery at %s; rebuilding", root)
             return OntoEnv.recover(str(root), **options)
+        except ValueError as e:
+            if "lock" in str(e).lower():
+                raise EnvironmentBusy(str(e)) from e
+            raise
+
+    def release(self) -> None:
+        """Close the environment but stay ready to reopen it.
+
+        This is what hands the store lock back to other processes; `root` and
+        the set of scanned roots are kept so the next use is a cheap reopen."""
+        with self.lock:
+            if self.env is None:
+                return
+            log.info("releasing the ontoenv store lock (idle)")
+            self._close_locked()
 
     def refresh(self, invalidate: bool = False, force: bool = False) -> None:
         """Re-run discovery (e.g. after files were saved/added).
@@ -109,9 +236,12 @@ class EnvironmentManager:
         that other files import. force=True additionally makes ontoenv bypass
         its timestamp/cache-age checks when rescanning sources."""
         with self.lock:
-            if self.env is not None:
+            if self.root is not None:
                 try:
-                    self.env.update(force=force)
+                    self.ensure(self.root).update(force=force)
+                    _namespace_index_invalidate()
+                except EnvironmentBusy as e:
+                    log.info("ontoenv is in use by another process: %s", e)
                 except Exception:
                     log.exception("ontoenv update failed")
         if invalidate:
@@ -128,8 +258,13 @@ class EnvironmentManager:
 
     def close(self) -> None:
         """Release the environment (flushing pending writes) so the next
-        process doesn't have to recover the catalog."""
+        process doesn't have to recover the catalog.
+
+        Closing also latches `stopped`: a request that arrives after shutdown
+        must not reopen the environment and start an update() seconds before
+        the process exits."""
         with self.lock:
+            self.stopped = True
             if self.env is not None:
                 self._close_locked()
             self.root = None
@@ -206,7 +341,79 @@ def _run_validation(uri: str) -> None:
     # *newer* scheduled runs.
     with _timers_lock:
         _timers.pop(uri, None)
-    validate_document(uri)
+    # The timer thread only queues the work; validation registers the document
+    # with ontoenv and may fetch imports, so it runs on the writer thread.
+    _writer.submit(_validation_job, uri)
+
+
+def _validation_job(uri: str, attempt: int = 1) -> None:
+    # If the user kept typing while this job sat in the queue, drop it here —
+    # before it touches the environment — rather than part-way through.
+    if _is_stale(uri):
+        log.debug("skipping superseded validation for %s", uri)
+        return
+    try:
+        validate_document(uri)
+    except EnvironmentBusy as e:
+        # Another process (a script, the ontoenv CLI) holds the store lock.
+        # Back off and try again rather than reporting a spurious failure.
+        if attempt > BUSY_RETRIES:
+            log.warning("giving up on %s: ontoenv still busy (%s)", uri, e)
+            return
+        delay = BUSY_RETRY_SECONDS * attempt
+        log.info("ontoenv busy; retrying %s in %.0fs", os.path.basename(uri), delay)
+        timer = threading.Timer(
+            delay, lambda: _writer.submit(_validation_job, uri, attempt + 1)
+        )
+        timer.daemon = True
+        timer.start()
+
+
+def _open_environment(root: Path) -> None:
+    """Writer job: connect (and run the initial scan) for `root`."""
+    try:
+        ENV.ensure(root)
+    except EnvironmentBusy as e:
+        log.info("ontoenv is in use by another process: %s", e)
+    except Exception:
+        log.exception("ontoenv load failed for %s", root)
+
+
+def _open_environment_async(start: Path) -> None:
+    """Kick off opening the environment enclosing `start` in the background."""
+    _writer.submit(_open_environment, find_repo_root(start))
+
+
+# timer that closes the environment once nothing has used it for a while
+_idle_timer: Optional[threading.Timer] = None
+_idle_lock = threading.Lock()
+
+
+def _arm_idle_release() -> None:
+    """(Re)start the countdown to releasing the store lock."""
+    if ENV_IDLE_SECONDS <= 0 or ENV.peek() is None:
+        return
+    with _idle_lock:
+        global _idle_timer
+        if _idle_timer is not None:
+            _idle_timer.cancel()
+        _idle_timer = threading.Timer(ENV_IDLE_SECONDS, _idle_release)
+        _idle_timer.daemon = True
+        _idle_timer.start()
+
+
+def _idle_release() -> None:
+    # Closing is queued like any other environment operation, so it can never
+    # land in the middle of a validation.
+    _writer.submit(ENV.release)
+
+
+def _cancel_idle_release() -> None:
+    with _idle_lock:
+        global _idle_timer
+        if _idle_timer is not None:
+            _idle_timer.cancel()
+            _idle_timer = None
 
 
 def _cancel_pending(uri: str) -> None:
@@ -243,26 +450,54 @@ def on_initialize(params: types.InitializeParams) -> None:
         ENV.root = find_repo_root(root)  # cheap; just records the root
 
 
+_background_stopped = threading.Event()
+
+
+def _stop_background() -> None:
+    """Quiesce the server: stop scheduling work, let the ontoenv mutation that
+    is currently running finish, then close the environment (which flushes
+    pending writes and drops the store lock).
+
+    The in-flight write is deliberately *not* cancelled: interrupting a
+    mutation is exactly what leaves the catalog needing recovery."""
+    if _background_stopped.is_set():
+        return
+    _background_stopped.set()
+    _cancel_idle_release()
+    with _timers_lock:
+        for timer in _timers.values():
+            timer.cancel()
+        _timers.clear()
+    started = time.monotonic()
+    _writer.stop()
+    waited = time.monotonic() - started
+    if waited > 1.0:
+        log.info("waited %.1fs for an ontoenv write to finish before closing", waited)
+    ENV.close()
+
+
 @server.feature(types.SHUTDOWN)
 def on_shutdown(*args) -> None:
-    # Close the environment explicitly: this flushes pending writes and drops
-    # the store lock, so the next server process can connect() without having
-    # to recover the catalog.
-    ENV.close()
+    _stop_background()
+
+
+@server.feature(types.EXIT)
+def on_exit(*args) -> None:
+    # pygls calls the user's exit handler before sys.exit, so clients that skip
+    # `shutdown` still get a clean close here.
+    _stop_background()
+
+
+atexit.register(_stop_background)
 
 
 @server.feature(types.TEXT_DOCUMENT_DID_OPEN)
 def did_open(params: types.DidOpenTextDocumentParams) -> None:
-    # Automatically load the ontoenv environment for the file's repository
-    # (creating it if necessary), pick up any new/changed files, and kick off
-    # validation of the opened file.
-    try:
-        path = _uri_to_path(params.text_document.uri)
-        env = ENV.ensure(find_repo_root(path.parent))
-        with ENV.lock:
-            env.update()
-    except Exception:
-        log.exception("ontoenv load failed on open")
+    # Load the ontoenv environment for the file's repository (creating it if
+    # necessary) on the writer thread, then validate the opened file. Both are
+    # queued rather than run here: opening an environment for a large repo
+    # takes seconds, and this handler runs on pygls' event loop.
+    _open_environment_async(_uri_to_path(params.text_document.uri).parent)
     _schedule_validation(params.text_document.uri)
 
 
@@ -273,8 +508,9 @@ def did_change(params: types.DidChangeTextDocumentParams) -> None:
 
 @server.feature(types.TEXT_DOCUMENT_DID_SAVE)
 def did_save(params: types.DidSaveTextDocumentParams) -> None:
-    # A saved file may be a new ontology in the repo; let ontoenv discover it.
-    ENV.refresh()
+    # A saved file may be a new ontology in the repo; let ontoenv discover it
+    # on the writer thread, ahead of the validation queued below.
+    _writer.submit(ENV.refresh)
     _schedule_validation(params.text_document.uri)
 
 
@@ -301,11 +537,34 @@ def _ontology_iri(graph: rdflib.Graph) -> Optional[str]:
     return None
 
 
+# Imports that could not be fetched, iri -> (when, error message). A broken or
+# unreachable owl:imports must not trigger a fresh download attempt (and so a
+# fresh mutation) on every keystroke. Entries expire so a transient network
+# failure heals on its own; refreshEnvironment clears them immediately.
+_unresolvable: dict[str, tuple[float, str]] = {}
+
+UNRESOLVABLE_RETRY_SECONDS = 60.0
+
+
+def _recent_failure(iri: str) -> Optional[str]:
+    entry = _unresolvable.get(iri)
+    if entry is None:
+        return None
+    when, message = entry
+    if time.monotonic() - when > UNRESOLVABLE_RETRY_SECONDS:
+        del _unresolvable[iri]
+        return None
+    return message
+
+
 def _check_imports(
-    env: OntoEnv, imports: list[str]
+    env: OntoEnv, imports: list[str], fetch: bool
 ) -> tuple[list[str], list[tuple[str, str]]]:
-    """Ensure every declared import is present in the environment, fetching
-    it if necessary. Returns (resolved_iris, [(iri, error_message), ...])."""
+    """Check that every declared import is present in the environment.
+
+    With `fetch` (writer thread only), anything missing is downloaded; without
+    it, a missing import is simply reported. Returns
+    (resolved_iris, [(iri, error_message), ...])."""
     resolved: list[str] = []
     failed: list[tuple[str, str]] = []
     for imp in imports:
@@ -319,12 +578,26 @@ def _check_imports(
             pass
         except Exception:
             log.exception("unexpected error looking up import %s", imp)
-        # Not cached: try to download it and capture the failure reason
+        known_failure = _recent_failure(imp)
+        if known_failure is not None:
+            failed.append((imp, known_failure))
+            continue
+        if not fetch:
+            # Read-only context (an LSP request): leave the download to the
+            # next validation instead of mutating from a request handler.
+            failed.append((imp, "not fetched yet; the next validation resolves it"))
+            continue
+        # Not cached: try to download it and capture the failure reason.
+        # A failed add() rolls its own mutation back as of ontoenv 0.6.1 (0.6.0
+        # left a `catalog.pending` marker behind, which forced the *next*
+        # connect() to rebuild the whole catalog), hence the floor in
+        # pyproject.toml.
         try:
             env.add(imp, fetch_imports=True)
             resolved.append(imp)
         except Exception as e:
             log.warning("import %s failed: %s", imp, e)
+            _unresolvable[imp] = (time.monotonic(), str(e))
             failed.append((imp, str(e)))
     return resolved, failed
 
@@ -340,20 +613,24 @@ def _build_shapes_graph(
     shapes = rdflib.Graph()
     failed: list[tuple[str, str]] = []
     imports = _imports_of(data_graph)
+    # Writing is only allowed from the writer thread; a read-only caller gets
+    # whatever the environment already holds.
+    may_write = _on_writer_thread()
 
     # Register the document itself so its imports are processed by ontoenv,
     # downloading anything not already cached. update(location) replaces the
     # stored graph for an already-known file; a plain add() would instead
     # no-op *and* mark the source as fresh, so later update() calls would skip
     # the file we are actively editing.
-    try:
-        env.update(str(doc_path))
-    except Exception:
-        log.exception("ontoenv update failed for %s", doc_path)
+    if may_write:
+        try:
+            env.update(str(doc_path))
+        except Exception:
+            log.exception("ontoenv update failed for %s", doc_path)
 
     # Explicitly verify each declared import resolved; collect failures so
     # they can be surfaced to the user as diagnostics.
-    resolved, failed = _check_imports(env, imports)
+    resolved, failed = _check_imports(env, imports, fetch=may_write)
 
     ont_iri = _ontology_iri(data_graph)
     if ont_iri:
@@ -430,6 +707,93 @@ def _invalidate_shapes_cache() -> None:
     _env_generation += 1
     _shapes_cache.clear()
     _last_shapes.clear()
+    # give previously unreachable imports another chance
+    _unresolvable.clear()
+
+
+# prefix -> (namespace IRI, location of the ontology that declares it or None).
+# Harvested on the writer thread so code actions keep working — and stay fast —
+# while the environment is closed: get_namespaces() alone takes seconds on an
+# environment the size of Brick, and used to run on every code-action request.
+_namespace_index: dict[str, tuple[str, Optional[str]]] = {}
+_namespace_index_stale = True
+
+
+def _namespace_index_invalidate() -> None:
+    global _namespace_index_stale
+    _namespace_index_stale = True
+
+
+def _refresh_namespace_index(env: OntoEnv) -> None:
+    """Writer job step: snapshot the environment's prefixes."""
+    global _namespace_index_stale
+    if not _namespace_index_stale:
+        return
+    index: dict[str, tuple[str, Optional[str]]] = {}
+    try:
+        for prefix, ns in env.get_namespaces().items():
+            index[prefix] = (str(ns), None)
+    except Exception:
+        log.exception("could not read namespaces from the environment")
+        return
+    # remember which ontology declares each prefix, so the quickfix can offer
+    # an owl:imports alongside the @prefix line
+    try:
+        for name in env.get_ontology_names():
+            try:
+                ont = env.get_ontology(name)
+                declared = ont.namespace_map or {}
+            except Exception:
+                continue
+            for prefix in declared:
+                ns, location = index.get(prefix, (None, None))
+                if ns is not None and location is None:
+                    index[prefix] = (ns, ont.location or name)
+    except Exception:
+        log.exception("could not map prefixes to ontologies")
+    _namespace_index.clear()
+    _namespace_index.update(index)
+    _namespace_index_stale = False
+    log.info("indexed %d namespace prefixes", len(_namespace_index))
+
+
+def _imports_in_text(text: str) -> list[str]:
+    """owl:imports of a buffer, falling back to a regex when it doesn't parse
+    (common mid-typing)."""
+    graph = rdflib.Graph()
+    try:
+        graph.parse(data=text, format="turtle")
+    except Exception:
+        return re.findall(r"owl:imports\s+<([^>]+)>", text)
+    return _imports_of(graph)
+
+
+def _shapes_for_request(uri: str, text: str) -> Optional[rdflib.Graph]:
+    """Shapes graph for a read-only LSP request (hover, completion, …).
+
+    Never mutates the environment. Request handlers run on pygls' event loop,
+    and a fetch started from one is precisely the mutation that gets abandoned
+    when the editor supersedes the request or shuts the server down. Anything
+    missing here is filled in by the next validation, on the writer thread."""
+    graph = _last_shapes.get(uri)
+    if graph is not None:
+        return graph
+    shapes = rdflib.Graph()
+    with ENV.borrow() as env:
+        if env is None:
+            # Not validated yet, or the environment is currently released.
+            # Let validation open it and build the real graph rather than
+            # taking the store lock from a request handler.
+            _schedule_validation(uri)
+            return None
+        for imp in _imports_in_text(text):
+            try:
+                env.copy_closure(imp, graph=shapes)
+            except Exception:
+                log.debug("import %s is not in the environment yet", imp)
+    # deliberately not cached in _last_shapes: it may be missing imports that
+    # have not been fetched yet, and validation publishes the complete graph
+    return shapes
 
 
 def _get_shapes(env: OntoEnv, data_graph: rdflib.Graph, doc_path: Path, uri: str):
@@ -521,6 +885,7 @@ def _line_range(text: str, line: int) -> types.Range:
 
 
 @server.feature(types.TEXT_DOCUMENT_REFERENCES)
+@server.thread()
 def references(params: types.ReferenceParams) -> Optional[list[types.Location]]:
     """Find every occurrence of the term under the cursor: in this file and
     in every other .ttl file in the repository."""
@@ -558,6 +923,7 @@ def references(params: types.ReferenceParams) -> Optional[list[types.Location]]:
     types.TEXT_DOCUMENT_CODE_ACTION,
     types.CodeActionOptions(code_action_kinds=[types.CodeActionKind.QuickFix]),
 )
+@server.thread()
 def code_action(params: types.CodeActionParams) -> Optional[list[types.CodeAction]]:
     """Quickfix: a prefixed name is used whose prefix is not declared, but is
     a known namespace in the ontology environment -> offer to add the @prefix
@@ -571,35 +937,22 @@ def code_action(params: types.CodeActionParams) -> Optional[list[types.CodeActio
         if not undeclared:
             return None
 
-        # namespaces known to the ontology environment (all discovered
-        # ontologies + the merged shapes graph)
-        env0 = ENV.ensure(find_repo_root(_uri_to_path(params.text_document.uri).parent))
-        known: dict[str, str] = {}
-        with ENV.lock:
-            try:
-                known.update({p: str(ns) for p, ns in env0.get_namespaces().items()})
-            except Exception:
-                pass
+        # Namespaces known to the environment, from the index built during
+        # validation, plus whatever the document's own shapes graph declares.
+        # This handler never opens or reads the environment: doing so would
+        # take the store lock away from other processes for the duration.
+        known: dict[str, str] = {p: ns for p, (ns, _loc) in _namespace_index.items()}
+        # ontology that declares each prefix, for the accompanying owl:imports
+        import_for = {
+            p: loc for p, (_ns, loc) in _namespace_index.items() if loc is not None
+        }
         graph = _last_shapes.get(params.text_document.uri)
         if graph is not None:
             known.update({p: str(ns) for p, ns in graph.namespaces()})
         if not known:
+            # nothing indexed yet — validation populates it
+            _schedule_validation(params.text_document.uri)
             return None
-
-        # find an ontology in the env that declares each missing prefix
-        import_for: dict[str, str] = {}
-        env = ENV.env
-        if env is not None:
-            with ENV.lock:
-                for name in env.get_ontology_names():
-                    try:
-                        ont = env.get_ontology(name)
-                        nm = ont.namespace_map or {}
-                    except Exception:
-                        continue
-                    for p in undeclared:
-                        if p in nm and p not in import_for:
-                            import_for[p] = ont.location or name
 
         # insertion point: after the last @prefix line
         lines = text.splitlines()
@@ -650,6 +1003,7 @@ def code_action(params: types.CodeActionParams) -> Optional[list[types.CodeActio
 
 
 @server.feature(types.TEXT_DOCUMENT_DOCUMENT_SYMBOL)
+@server.thread()
 def document_symbol(
     params: types.DocumentSymbolParams,
 ) -> Optional[list[types.DocumentSymbol]]:
@@ -700,6 +1054,7 @@ def document_symbol(
 
 
 @server.feature(types.TEXT_DOCUMENT_HOVER)
+@server.thread()
 def hover(params: types.HoverParams) -> Optional[types.Hover]:
     """Show documentation for the term under the cursor: rdfs:label,
     rdfs:comment, types, and supertypes from the ontology environment."""
@@ -708,22 +1063,9 @@ def hover(params: types.HoverParams) -> Optional[types.Hover]:
         iri = _iri_at_position(doc.source, params.position.line, params.position.character)
         if not iri:
             return None
-        graph = _last_shapes.get(params.text_document.uri)
+        graph = _shapes_for_request(params.text_document.uri, doc.source)
         if graph is None:
-            # fall back to building the closure (imports recovered by regex if
-            # the buffer doesn't parse)
-            data_graph = rdflib.Graph()
-            try:
-                data_graph.parse(data=doc.source, format="turtle")
-            except Exception:
-                pass
-            env = ENV.ensure(find_repo_root(_uri_to_path(params.text_document.uri).parent))
-            with ENV.lock:
-                graph, _failed = _get_shapes(
-                    env, data_graph, _uri_to_path(params.text_document.uri),
-                    params.text_document.uri,
-                )
-            _last_shapes[params.text_document.uri] = graph
+            return None
 
         term = URIRef(iri)
         sections: list[str] = []
@@ -757,6 +1099,7 @@ def hover(params: types.HoverParams) -> Optional[types.Hover]:
     types.TEXT_DOCUMENT_COMPLETION,
     types.CompletionOptions(trigger_characters=[":"], resolve_provider=False),
 )
+@server.thread()
 def completion(params: types.CompletionParams) -> Optional[types.CompletionList]:
     """Prefix-aware completion: `brick:IAQ|` completes terms from the Brick
     namespace using the merged ontology environment (imports closure)."""
@@ -774,27 +1117,12 @@ def completion(params: types.CompletionParams) -> Optional[types.CompletionList]
         if namespace is None:
             return None
 
-        graph = _last_shapes.get(params.text_document.uri)
+        # Not validated yet, or the buffer doesn't currently parse (common
+        # mid-typing): fall back to the closure of whatever imports the
+        # environment already holds.
+        graph = _shapes_for_request(params.text_document.uri, doc.source)
         if graph is None:
-            # Not validated yet (or the buffer doesn't currently parse —
-            # common mid-typing). Extract imports with a regex and build the
-            # closure from those.
-            env = ENV.ensure(find_repo_root(_uri_to_path(params.text_document.uri).parent))
-            graph = rdflib.Graph()
-            with ENV.lock:
-                try:
-                    data_graph = rdflib.Graph()
-                    data_graph.parse(data=doc.source, format="turtle")
-                    graph, _failed = _build_shapes_graph(
-                        env, data_graph, _uri_to_path(params.text_document.uri)
-                    )
-                except Exception:
-                    for imp in re.findall(r"owl:imports\s+<([^>]+)>", doc.source):
-                        try:
-                            env.copy_closure(imp, graph=graph)
-                        except Exception:
-                            log.warning("completion: could not load import %s", imp)
-            _last_shapes[params.text_document.uri] = graph
+            return None
 
         items = _completion_items_for_prefix(graph, prefix, namespace)
         return types.CompletionList(is_incomplete=False, items=items)
@@ -889,7 +1217,13 @@ def _validate_document(uri: str, progress_token: Optional[str]) -> bool:
         env = ENV.ensure(find_repo_root(path.parent))
         with ENV.lock:
             shapes, failed_imports = _get_shapes(env, data_graph, path, uri)
+            _refresh_namespace_index(env)
         _last_shapes[uri] = shapes
+        # Everything below works on detached rdflib graphs, so hand the store
+        # lock back now instead of holding it through the SHACL run — which is
+        # by far the longest part of a validation.
+        if ENV_IDLE_SECONDS > 0:
+            ENV.release()
 
         for imp_iri, err in failed_imports:
             line = _find_line(text, URIRef(imp_iri))
@@ -922,6 +1256,10 @@ def _validate_document(uri: str, progress_token: Optional[str]) -> bool:
         _progress_report(progress_token, "publishing diagnostics…")
         if not conforms:
             diagnostics.extend(_report_to_diagnostics(report_graph, text))
+    except EnvironmentBusy:
+        # let the caller retry once the other process is done; publishing
+        # anything now would just flash stale diagnostics
+        raise
     except Exception:
         log.exception("validation failed for %s", uri)
         conforms = False
@@ -1023,7 +1361,21 @@ def _ontology_file(env: OntoEnv, iri: str) -> Optional[str]:
     return _materialize_remote(env, ont.name, ont.location)
 
 
+def _definition_job(root: Path, iri: str) -> Optional[str]:
+    """Writer job: resolve an ontology IRI to a local file URI."""
+    try:
+        env = ENV.ensure(root)
+    except EnvironmentBusy as e:
+        log.info("ontoenv is in use by another process: %s", e)
+        return None
+    except Exception:
+        log.exception("could not open the environment for goto-definition")
+        return None
+    return _ontology_file(env, iri)
+
+
 @server.feature(types.TEXT_DOCUMENT_DEFINITION)
+@server.thread()
 def definition(params: types.DefinitionParams) -> Optional[types.Location]:
     """Goto-definition: jump from an ontology IRI (e.g. in an owl:imports
     statement) to the local .ttl file for that ontology. Remote ontologies
@@ -1033,9 +1385,15 @@ def definition(params: types.DefinitionParams) -> Optional[types.Location]:
         iri = _iri_at_position(doc.source, params.position.line, params.position.character)
         if not iri:
             return None
-        env = ENV.ensure(find_repo_root(_uri_to_path(params.text_document.uri).parent))
-        with ENV.lock:
-            target = _ontology_file(env, iri)
+        # Resolving an IRI to a file needs the environment, and materializing a
+        # remote ontology writes a cache file, so this runs as a writer job:
+        # the handler is threaded, so waiting doesn't block the event loop.
+        future = _writer.submit(
+            _definition_job, find_repo_root(_uri_to_path(params.text_document.uri).parent), iri
+        )
+        if future is None:
+            return None
+        target = future.result(timeout=60)
         if target is None:
             return None
         zero = types.Range(
@@ -1054,16 +1412,23 @@ CMD_VALIDATE_FILE = "shifty-lsp.validateFile"
 
 
 @server.command(CMD_REFRESH_ENVIRONMENT)
+@server.thread()
 def refresh_environment(*args) -> None:
     """Re-scan the repository, re-registering all .ttl files, invalidating
     cached shapes graphs, and revalidating all open documents."""
     log.info("command: refreshEnvironment")
-    ENV.refresh(invalidate=True, force=True)
+    future = _writer.submit(ENV.refresh, invalidate=True, force=True)
+    if future is not None:
+        try:
+            future.result()
+        except Exception:
+            log.exception("refreshEnvironment failed")
     for uri in list(server.workspace.text_documents):
         _schedule_validation(uri)
 
 
 @server.command(CMD_VALIDATE_FILE)
+@server.thread()
 def validate_file(*args) -> bool:
     """Validate a single file (the current document) and publish diagnostics.
 
@@ -1082,8 +1447,16 @@ def validate_file(*args) -> bool:
             return True
         uri = docs[0]
     _cancel_pending(uri)  # don't let a queued debounced run override this one
+    # Runs on the writer thread like every other validation; this handler is
+    # threaded, so waiting for the result doesn't block the event loop.
+    future = _writer.submit(validate_document, uri)
+    if future is None:
+        return False
     try:
-        conforms = validate_document(uri)
+        conforms = future.result()
+    except EnvironmentBusy as e:
+        log.warning("could not validate %s: ontoenv is in use (%s)", uri, e)
+        conforms = False
     except Exception:
         log.exception("validation failed for %s", uri)
         conforms = False
@@ -1097,12 +1470,39 @@ def _publish(uri: str, diagnostics: list[types.Diagnostic]) -> None:
     )
 
 
+def _install_signal_handlers() -> None:
+    """Editors terminate language servers rather than asking them to exit.
+    SIGTERM/SIGHUP are catchable, so use them to close the environment the same
+    way `shutdown` does. (SIGKILL isn't, which is why every mutation is kept
+    short and serialized.)"""
+
+    def handler(signum, _frame):
+        log.info("received signal %s; shutting down", signum)
+        _stop_background()
+        # pygls' reader thread is parked in a blocking read on stdin that may
+        # never return, so a normal exit would hang here (and get us SIGKILLed
+        # instead). The environment is closed and flushed at this point, so
+        # leaving right away is safe.
+        logging.shutdown()
+        os._exit(0)
+
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        try:
+            signal.signal(sig, handler)
+        except (AttributeError, OSError, ValueError):
+            log.debug("could not install handler for %s", sig, exc_info=True)
+
+
 def main() -> None:
     logging.basicConfig(
         level=os.environ.get("SHIFTY_LSP_LOG", "INFO"),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
-    server.start_io()
+    _install_signal_handlers()
+    try:
+        server.start_io()
+    finally:
+        _stop_background()
 
 
 if __name__ == "__main__":

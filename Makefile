@@ -27,6 +27,8 @@ dev: $(VENV_PY)
 
 test: dev
 	$(VENV_PY) test_e2e.py
+	$(VENV_PY) test_recovery.py
+	$(VENV_PY) test_lock_release.py
 
 # --- build artifacts ---------------------------------------------------------
 

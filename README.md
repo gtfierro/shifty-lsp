@@ -92,6 +92,50 @@ Ontology Environment* commands in the command palette.
 3. On save, ontoenv re-scans the repo so newly added `.ttl` files join the environment
    (this does not force shapes-graph rebuilds — see `refreshEnvironment` for that).
 
+### Sharing `.ontoenv/` with other processes
+
+An open writable ontoenv connection holds an **exclusive lock** on the store. While a
+process holds it, another process's writable `connect()` fails with *"could not acquire
+exclusive lock"* and a read-only `connect()` blocks indefinitely. A language server that
+kept the environment open for its lifetime would therefore make the environment unusable
+from anything else for as long as a `.ttl` file was open in the editor.
+
+So the server holds the environment only while it is using it, and **releases it after 5
+seconds of inactivity** — reopening costs milliseconds, and the expensive initial source
+scan is done once per process, not on every reopen. Set `SHIFTY_LSP_IDLE_RELEASE` to
+change the delay in seconds, or to `0` to keep the environment open for the lifetime of
+the server.
+
+If another process *is* holding the lock when the server needs it, validation backs off
+and retries (5 times, 2s apart) instead of reporting a spurious failure.
+
+### Writes to the environment
+
+Everything that mutates the ontoenv environment — opening it, `update()`, fetching an
+import — runs on a single background writer thread, and validation runs there too.
+Nothing else ever writes:
+
+- LSP requests (hover, completion, code actions, goto-definition) are strictly
+  read-only. They use whatever the environment already holds; an import that hasn't been
+  fetched yet is filled in by the next validation rather than downloaded from the
+  request handler.
+- A write that has started always runs to completion. On `shutdown`/`exit`, and on
+  SIGTERM/SIGHUP, queued work is dropped but the in-flight write is waited for before
+  the environment is closed.
+
+This matters because an ontoenv mutation that is abandoned part-way leaves a
+`.ontoenv/catalog.pending` marker behind: the next `connect()` then fails with
+`CatalogRecoveryError` and has to rescan every stored graph to rebuild the catalog. The
+server recovers automatically if it finds one (the ontology data itself is never at
+risk), but recovery is slow, so the point is to not create the marker in the first place.
+Unreachable imports are also remembered for a minute, so a broken `owl:imports` isn't
+retried — and re-downloaded — on every keystroke.
+
+ontoenv **0.6.1 or newer** is required: in 0.6.0 a *failed* `add()` (an import that 404s,
+an unreachable host, a file that won't parse) left the marker behind even though nothing
+had been written, so a single broken `owl:imports` poisoned the environment for the next
+startup.
+
 ## Commands
 
 Executable via `workspace/executeCommand` from your editor:
