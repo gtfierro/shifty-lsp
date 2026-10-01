@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pygls>=2.0",
     "ontoenv>=0.6.1,<0.7",
-    "pyshifty>=0.3",
+    "pyshifty>=0.5",
     "rdflib>=7.0",
 ]
 
