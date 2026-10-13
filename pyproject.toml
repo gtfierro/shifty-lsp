@@ -1,6 +1,6 @@
 [project]
 name = "shifty-lsp"
-version = "0.1.4"
+version = "0.1.5"
 description = "Language server for Turtle/RDF ontologies: ontoenv-powered owl:imports resolution and continuous SHACL validation via shifty"
 requires-python = ">=3.11"
 dependencies = [
