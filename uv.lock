@@ -167,7 +167,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "ontoenv", specifier = ">=0.6.1,<0.7" },
+    { name = "ontoenv", specifier = ">=0.6.4,<0.7" },
     { name = "pygls", specifier = ">=2.0" },
     { name = "pyshifty", specifier = ">=0.6.0" },
     { name = "rdflib", specifier = ">=7.0" },

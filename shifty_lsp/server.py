@@ -2,7 +2,8 @@
 
 Features:
   - Uses ontoenv to manage an ontology environment rooted at the enclosing
-    Git repository (or workspace folder). All .ttl files in the repo are
+    Git repository (or workspace folder). All ontology source files in the
+    repo (.ttl and literate-Turtle .ttl.md; see DEFAULT_SOURCE_SUFFIXES) are
     discovered and owl:imports are resolved/downloaded automatically.
   - On open/change/save, resolves the document's owl:imports, runs SHACL-AF
     inference + SHACL validation with shifty, using the imported ontologies
@@ -59,6 +60,79 @@ ENV_IDLE_SECONDS = float(os.environ.get("SHIFTY_LSP_IDLE_RELEASE", "5"))
 # Another process may hold the store lock; back off and try again (linearly).
 BUSY_RETRY_SECONDS = 2.0
 BUSY_RETRIES = 5
+
+
+# --- which files count as ontology sources ----------------------------------
+#
+# This is the single source of truth for the file types the server follows:
+# ontoenv's include globs, the repo-wide reference search, and anything else
+# that walks the repository derive from it. Suffixes are matched against the
+# end of the file name, so multi-part suffixes like ".ttl.md" work.
+#
+# ".ttl.md" is literate Turtle: Markdown whose prose lines are Turtle comments
+# ("# ...") and whose indented blocks are Turtle, so the file is valid Turtle
+# as-is. ontoenv picks it up by content sniffing; rdflib parses it as Turtle.
+#
+# Extend the list without code changes via
+#   - the SHIFTY_LSP_EXTRA_SUFFIXES environment variable (comma-separated), or
+#   - initializationOptions: {"extraSuffixes": [".n3", ...]} from the client.
+# Editor filetype registration (editors/vscode/package.json,
+# plugin/shifty_lsp.lua) has to list the same suffixes for the server to be
+# started on those files.
+DEFAULT_SOURCE_SUFFIXES: tuple[str, ...] = (".ttl", ".ttl.md")
+
+# Directories never searched for sources. ".ontoenv" holds the store and the
+# lsp-cache of materialized remote ontologies, which must not be re-ingested
+# as local files.
+IGNORED_DIRS: frozenset[str] = frozenset({".ontoenv", ".git"})
+
+
+def _normalize_suffixes(suffixes) -> tuple[str, ...]:
+    out: list[str] = []
+    for s in suffixes:
+        s = str(s).strip()
+        if not s:
+            continue
+        s = s.lstrip("*")
+        if not s.startswith("."):
+            s = "." + s
+        if s not in out:
+            out.append(s)
+    return tuple(out)
+
+
+SOURCE_SUFFIXES: tuple[str, ...] = _normalize_suffixes(
+    (*DEFAULT_SOURCE_SUFFIXES, *os.environ.get("SHIFTY_LSP_EXTRA_SUFFIXES", "").split(","))
+)
+
+
+def add_source_suffixes(suffixes) -> None:
+    """Follow additional file types (call before the environment is opened)."""
+    global SOURCE_SUFFIXES
+    SOURCE_SUFFIXES = _normalize_suffixes((*SOURCE_SUFFIXES, *suffixes))
+
+
+def source_include_globs() -> list[str]:
+    """ontoenv `includes` patterns for SOURCE_SUFFIXES."""
+    return [f"*{s}" for s in SOURCE_SUFFIXES]
+
+
+def source_exclude_globs() -> list[str]:
+    """ontoenv `excludes` patterns for IGNORED_DIRS."""
+    return [f"**/{d}/**" for d in sorted(IGNORED_DIRS)]
+
+
+def is_source_file(path: Path | str) -> bool:
+    return os.path.basename(path).endswith(SOURCE_SUFFIXES)
+
+
+def iter_source_files(root: Path):
+    """Yield every ontology source file under `root`, skipping IGNORED_DIRS."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(d for d in dirnames if d not in IGNORED_DIRS)
+        for name in sorted(filenames):
+            if is_source_file(name):
+                yield Path(dirpath) / name
 
 
 def _uri_to_path(uri: str) -> Path:
@@ -200,7 +274,8 @@ class EnvironmentManager:
     def _connect(root: Path) -> OntoEnv:
         options = dict(
             search_directories=[str(root)],
-            includes=["*.ttl"],
+            includes=source_include_globs(),
+            excludes=source_exclude_globs(),
             strict=False,
         )
         try:
@@ -436,6 +511,10 @@ def on_initialize(params: types.InitializeParams) -> None:
     global _client_work_done_progress
     if params.capabilities.window and params.capabilities.window.work_done_progress:
         _client_work_done_progress = True
+    opts = params.initialization_options
+    if isinstance(opts, dict) and isinstance(opts.get("extraSuffixes"), list):
+        add_source_suffixes(opts["extraSuffixes"])
+    log.info("following ontology sources: %s", ", ".join(SOURCE_SUFFIXES))
     # NOTE: deliberately do NOT open the ontoenv environment here — it can
     # take seconds (first-time store creation, lock contention) and would
     # block the initialize response, during which the client rejects all
@@ -902,8 +981,8 @@ def references(params: types.ReferenceParams) -> Optional[list[types.Location]]:
             )
         root = ENV.root or find_repo_root(_uri_to_path(params.text_document.uri).parent)
         self_path = os.path.realpath(_uri_to_path(params.text_document.uri))
-        for ttl in sorted(root.rglob("*.ttl")):
-            if ".ontoenv" in ttl.parts or os.path.realpath(ttl) == self_path:
+        for ttl in iter_source_files(root):
+            if os.path.realpath(ttl) == self_path:
                 continue
             try:
                 text = ttl.read_text()

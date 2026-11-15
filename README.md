@@ -3,7 +3,8 @@
 A language server for Turtle/RDF ontology files, combining:
 
 - **[ontoenv](https://ontoenv.gtf.fyi)** — manages an ontology environment rooted at the
-  enclosing Git repository. All `*.ttl` files in the repo are discovered automatically, and
+  enclosing Git repository. All ontology sources in the repo (`*.ttl` and literate-Turtle
+`*.ttl.md`; see [Ontology source files](#ontology-source-files)) are discovered automatically, and
   `owl:imports` declarations are resolved and downloaded into a local cache.
 - **[shifty](https://shifty.gtf.fyi)** — continuous SHACL validation + SHACL-AF inference.
   The document is validated against the transitive closure of its `owl:imports` (used as the
@@ -47,7 +48,7 @@ vim.lsp.enable("shifty-lsp")
 ```
 
 `setup()` accepts `{ keymaps = false, commands = false, diagnostics = false }` to
-disable any part. The plugin also registers `.ttl` as the `turtle` filetype.
+disable any part. The plugin also registers `.ttl` and `.ttl.md` as the `turtle` filetype.
 
 **VS Code extension**: a prebuilt `.vsix` lives in `editors/vscode/`. Install with:
 
@@ -61,9 +62,27 @@ or rebuild it yourself:
 cd editors/vscode && npm install && npx @vscode/vsce package
 ```
 
-It adds Turtle language support, starts the server for `.ttl` files (configurable via
+It adds Turtle language support, starts the server for `.ttl` and `.ttl.md` files (configurable via
 the `shifty-lsp.path` setting), and exposes *Shifty: Validate File* and *Shifty: Refresh
 Ontology Environment* commands in the command palette.
+
+## Ontology source files
+
+The server follows `*.ttl` and `*.ttl.md` files. A `.ttl.md` file is literate Turtle:
+Markdown whose prose lines are Turtle comments (`# ...`) and whose indented blocks are
+Turtle, so it is valid Turtle as-is.
+
+The list lives in one place, `DEFAULT_SOURCE_SUFFIXES` in `shifty_lsp/server.py`. The
+ontoenv include globs and the repository-wide reference search both come from it.
+`.ontoenv/` (including the cache of downloaded remote ontologies) and `.git/` are never
+scanned. You can add suffixes without changing code:
+
+- `SHIFTY_LSP_EXTRA_SUFFIXES=".n3,.owl.ttl"` in the server's environment, or
+- `initializationOptions = { extraSuffixes = { ".n3" } }` from the LSP client.
+
+Editors start the server only for files they map to the `turtle` filetype. If you add a
+suffix, also register it in your editor (`editors/vscode/package.json`,
+`plugin/shifty_lsp.lua`).
 
 ## How it works
 
@@ -89,7 +108,7 @@ Ontology Environment* commands in the command palette.
      are discarded rather than overwriting fresher state.
    - When validation completes, a `window/showMessage` summary is sent
      (`shifty: file.ttl: conforms ✓` / `N error(s), M warning(s)`).
-3. On save, ontoenv re-scans the repo so newly added `.ttl` files join the environment
+3. On save, ontoenv re-scans the repo so newly added source files join the environment
    (this does not force shapes-graph rebuilds — see `refreshEnvironment` for that).
 
 ### Sharing `.ontoenv/` with other processes
@@ -164,7 +183,8 @@ the merged ontology environment.
 ## References
 
 `textDocument/references`: finds every occurrence of the term under the cursor, both in
-the current file and in all other `.ttl` files in the repository (`.ontoenv/` excluded).
+the current file and in all other ontology source files in the repository (`.ontoenv/`
+and `.git/` excluded).
 
 ## Code actions (quickfix)
 

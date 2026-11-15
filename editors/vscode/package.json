@@ -21,7 +21,7 @@
       {
         "id": "turtle",
         "aliases": ["Turtle", "turtle"],
-        "extensions": [".ttl"],
+        "extensions": [".ttl", ".ttl.md"],
         "configuration": "./language-configuration.json"
       }
     ],
