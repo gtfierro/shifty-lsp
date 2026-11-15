@@ -2,7 +2,7 @@
   "name": "shifty-lsp",
   "displayName": "shifty-lsp",
   "description": "Turtle/RDF ontology support: SHACL validation via shifty, owl:imports management via ontoenv",
-  "version": "0.1.0",
+  "version": "0.1.7",
   "publisher": "gtfierro",
   "license": "BSD-3-Clause",
   "engines": {

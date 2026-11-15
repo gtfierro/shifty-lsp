@@ -53,7 +53,7 @@ disable any part. The plugin also registers `.ttl` and `.ttl.md` as the `turtle`
 **VS Code extension**: a prebuilt `.vsix` lives in `editors/vscode/`. Install with:
 
 ```sh
-code --install-extension editors/vscode/shifty-lsp-0.1.0.vsix
+code --install-extension editors/vscode/shifty-lsp-0.1.7.vsix
 ```
 
 or rebuild it yourself:
